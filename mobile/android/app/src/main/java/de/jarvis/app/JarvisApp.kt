@@ -8,6 +8,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +37,10 @@ class JarvisApp : Application() {
     val entries = MutableStateFlow(listOf<Entry>())
     val devices = MutableStateFlow(listOf<Device>())
     val paired = MutableStateFlow(false)
+    /** Zustand des Rings (Zuhören setzt die Activity selbst). */
+    val orb = MutableStateFlow(OrbMode.Idle)
+    /** Mikrofonpegel 0..1 während des Zuhörens. */
+    val level = MutableStateFlow(0f)
 
     @Volatile var jarvis: Jarvis? = null
         private set
@@ -54,6 +59,12 @@ class JarvisApp : Application() {
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts.language = Locale.GERMANY
+                tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) { orb.value = OrbMode.Speaking }
+                    override fun onDone(utteranceId: String?) { orb.compareAndSet(OrbMode.Speaking, OrbMode.Idle) }
+                    @Deprecated("Pflicht-Override älterer API")
+                    override fun onError(utteranceId: String?) { orb.compareAndSet(OrbMode.Speaking, OrbMode.Idle) }
+                })
                 ttsReady = true
             }
         }
@@ -114,11 +125,21 @@ class JarvisApp : Application() {
     fun ask(text: String, speak: Boolean) {
         if (text.isBlank()) return
         add(Entry(fromUser = true, text = text))
+        orb.value = OrbMode.Thinking
         scope.launch {
             val reply = withContext(Dispatchers.IO) {
                 jarvis?.ask(text) ?: Reply(false, "Noch nicht gekoppelt.")
             }
             add(Entry(fromUser = false, text = reply.text, ok = reply.ok))
+            if (!reply.ok) {
+                orb.value = OrbMode.Error
+                launch {
+                    delay(2500)
+                    orb.compareAndSet(OrbMode.Error, OrbMode.Idle)
+                }
+            } else if (!speak || !ttsReady) {
+                orb.value = OrbMode.Idle
+            }
             if (speak) say(reply.text)
         }
     }

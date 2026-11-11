@@ -7,6 +7,8 @@ import Speech
 final class SpeechInput: ObservableObject {
     @Published var listening = false
     @Published var partial = ""
+    /// Mikrofonpegel 0…1 für den Ring.
+    @Published var level: Float = 0
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "de-DE"))
     private let engine = AVAudioEngine()
@@ -57,8 +59,14 @@ final class SpeechInput: ObservableObject {
 
             let input = engine.inputNode
             input.removeTap(onBus: 0)
-            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { buffer, _ in
+            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { [weak self] buffer, _ in
                 request.append(buffer)
+                guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+                var sum: Float = 0
+                for i in 0..<Int(buffer.frameLength) { sum += samples[i] * samples[i] }
+                let rms = (sum / Float(buffer.frameLength)).squareRoot()
+                let value = min(1, rms * 8)
+                Task { @MainActor in self?.level = value }
             }
             engine.prepare()
             try engine.start()
@@ -92,6 +100,7 @@ final class SpeechInput: ObservableObject {
     func stop(send: Bool) {
         guard listening else { return }
         listening = false
+        level = 0
         silenceTimer?.invalidate()
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)

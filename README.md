@@ -29,6 +29,7 @@ Regeln einen Satz nicht verstehen.
 | Spracheingabe: „Jarvis, …" + Whisper lokal, optional auf der Grafikkarte | ✅ |
 | Startet automatisch mit Windows/macOS/Linux, ohne Fenster | ✅ |
 | HUD: leuchtender Ring, der sich beim Sprechen mit Jarvis einblendet | ✅ |
+| Google-Suche und Musik (Apple Music, Spotify, YouTube Music) | ✅ |
 | Computer Use (Claude bedient den Bildschirm) | Phase 3 |
 | Apps für Android, iPhone und iPad (Mikrofon-Taste, Dateien, Kopplung per QR-Code) | ✅ |
 | Zugriff von unterwegs (Relay) | Phase 5 |
@@ -77,6 +78,34 @@ Schlüssel gesetzt, nimmt Jarvis automatisch Claude.
 
 **Windows:** Beim ersten Start fragt die Firewall nach Port 7879. Für das Heimnetz
 (privates Netzwerk) erlauben.
+
+## Suchen und Musik
+
+```text
+„Jarvis, google Wetter Berlin"            → Google-Suche im Browser
+„Such nach Minecraft Mods am PC"          → … im Browser des PCs
+„Spiel Thunderstruck von AC/DC"            → Musikdienst (Standard: Apple Music)
+„Spiel Musik von Adele auf Spotify"        → bestimmter Dienst
+„Pause" · „Weiter" · „Nächstes Lied" · „Stopp die Musik am PC"
+```
+
+Was „spiel …" genau tut, hängt davon ab, was das jeweilige System erlaubt:
+
+| Gerät | Apple Music | Spotify |
+|---|---|---|
+| iPhone/iPad | spielt Treffer aus deiner Mediathek sofort, sonst öffnet sich die Suche in der Musik-App | öffnet die Suche |
+| Android | spielt den besten Treffer direkt („Spiele per Suche") | spielt den besten Treffer direkt |
+| Mac | spielt Treffer aus der Mediathek sofort, sonst Suche in der Musik-App | öffnet die Suche |
+| Windows/Linux | öffnet die Suche auf music.apple.com | öffnet die Suche in der Spotify-App |
+
+Pause/Weiter/Nächstes Lied wirken als Medientasten auf den Player, der gerade
+läuft (Windows, Android), bzw. auf die Musik-App (Mac, iPhone). Linux braucht
+`playerctl`. Den Standarddienst stellst du ein mit:
+
+```toml
+[music]
+service = "apple-music"   # oder "spotify", "youtube-music"
+```
 
 ## HUD
 
@@ -128,7 +157,9 @@ Befehle, gleiche Dateiübertragung.
 Kamera-App scannen. Jarvis öffnet sich und ist gekoppelt.
 
 **Was geht:**
-- Mikrofon-Taste: „Öffne Minecraft am PC", „Schick die Datei Bericht an mein Handy"
+- Der Jarvis-Ring ist die Mikrofon-Taste: antippen, sprechen – er pulsiert mit
+  deiner Stimme, dreht beim Nachdenken schneller und schwingt beim Vorlesen
+- Sprachbefehle: „Öffne Minecraft am PC", „Schick die Datei Bericht an mein Handy"
   – erkannt von der Spracherkennung des Handys (auf dem Gerät, kostenlos)
 - Freie Sätze deutet das Sprachmodell auf dem PC (Ollama) – das Handy fragt es einfach
 - Dateien senden: Büroklammer in der App, auf Android auch „Teilen → Jarvis"

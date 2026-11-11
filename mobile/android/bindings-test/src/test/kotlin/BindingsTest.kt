@@ -23,6 +23,9 @@ class FakeBridge : PlatformBridge {
     }
     override fun speak(text: String) {}
     override fun fileReceived(path: String) { received += path }
+    override fun openUrl(url: String): Reply { opened += url; return Reply(true, "geöffnet") }
+    override fun playMusic(query: String, service: String): Reply { opened += "$service:$query"; return Reply(true, "$query läuft") }
+    override fun media(command: String): Reply = Reply(true, command)
 }
 
 class BindingsTest {
@@ -81,6 +84,15 @@ class BindingsTest {
             val r = phone.ask("öffne Spotify")
             assertTrue(r.ok, r.text)
             assertEquals(listOf("Spotify"), bridge.opened.toList())
+
+            // Google-Suche und Musik laufen über die Kotlin-Brücke
+            assertTrue(phone.ask("google Wetter Berlin").ok)
+            val music = phone.ask("spiel Musik von Adele")
+            assertEquals("Adele läuft", music.text)
+            assertEquals(
+                listOf("Spotify", "https://www.google.com/search?q=Wetter+Berlin", "apple-music:Adele"),
+                bridge.opened.toList(),
+            )
 
             // Datei Handy -> PC
             val photo = File(phoneDir, "urlaub.jpg").apply { writeBytes(ByteArray(200_000) { (it % 251).toByte() }) }

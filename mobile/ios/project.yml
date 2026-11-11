@@ -37,6 +37,7 @@ targets:
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSMicrophoneUsageDescription: Jarvis hört zu, solange du die Mikrofon-Taste gedrückt hältst.
         NSSpeechRecognitionUsageDescription: Jarvis wandelt deine Befehle auf dem Gerät in Text um.
+        NSAppleMusicUsageDescription: Jarvis spielt auf Zuruf Musik aus deiner Mediathek ab.
         NSLocalNetworkUsageDescription: Jarvis verbindet sich verschlüsselt mit deinen eigenen Geräten im WLAN.
         NSBonjourServices: [_jarvis._tcp]
         # Empfangene Dateien in der Dateien-App unter „Auf meinem iPhone › Jarvis"

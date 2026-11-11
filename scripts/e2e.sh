@@ -4,6 +4,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo build -q
+for port in 7878 7879 7888 7889; do
+  if (exec 3<>/dev/tcp/127.0.0.1/$port) 2>/dev/null; then
+    echo "Port $port ist belegt – läuft noch ein jarvisd? Bitte zuerst beenden." >&2; exit 2
+  fi
+done
 B=$PWD/target/debug
 W=$(mktemp -d)
 export RUST_BACKTRACE=0 ANTHROPIC_API_KEY=

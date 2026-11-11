@@ -283,6 +283,161 @@ pub fn best_match(wanted: &str, candidates: &[PathBuf]) -> Option<PathBuf> {
         .map(|(_, _, p)| p.clone())
 }
 
+/// Öffnet eine Adresse im Standardbrowser bzw. der zuständigen App.
+pub fn open_url(url: &str) -> Result<()> {
+    let mut cmd = if cfg!(target_os = "windows") {
+        // rundll32 statt `cmd /C start`: dort würde `&` in der Adresse als Befehlstrenner gelten.
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", url]);
+        c
+    } else if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    } else {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    crate::autostart::quiet(&mut cmd)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| anyhow!("Browser startet nicht: {e}"))?;
+    Ok(())
+}
+
+/// Musik abspielen. Apple Music auf dem Mac spielt Treffer aus der Mediathek
+/// direkt; sonst öffnet Jarvis die Suche des Dienstes.
+pub fn play_music(query: &str, service: &str) -> Result<String> {
+    use crate::web;
+    let name = web::service_name(service);
+    match service {
+        "spotify" => open_url(&web::spotify(query))?,
+        "youtube-music" => open_url(&web::youtube_music(query))?,
+        _ => {
+            #[cfg(target_os = "macos")]
+            if let Some(track) = macos_play_from_library(query) {
+                return Ok(format!("Ich spiele {track}."));
+            }
+            if cfg!(target_os = "macos") {
+                open_url(&web::apple_music_app(query))?;
+            } else {
+                open_url(&web::apple_music_web(query))?;
+            }
+        }
+    }
+    Ok(format!("{name} zeigt „{query}“ – zum Abspielen auswählen."))
+}
+
+/// Sucht in der Mediathek der Musik-App und spielt den ersten Treffer.
+/// Der Suchbegriff wird als Argument übergeben, nie in das Skript eingesetzt.
+#[cfg(target_os = "macos")]
+fn macos_play_from_library(query: &str) -> Option<String> {
+    let (title, artist) = match query.split_once(" von ") {
+        Some((t, a)) => (t.trim().to_string(), a.trim().to_string()),
+        None => (query.trim().to_string(), String::new()),
+    };
+    let script = r#"on run argv
+  set t to item 1 of argv
+  set a to item 2 of argv
+  tell application "Music"
+    if a is "" then
+      set hits to (every track of library playlist 1 whose name contains t or artist contains t)
+    else
+      set hits to (every track of library playlist 1 whose name contains t and artist contains a)
+    end if
+    if hits is {} then return ""
+    play item 1 of hits
+    return (name of item 1 of hits) & " von " & (artist of item 1 of hits)
+  end tell
+end run"#;
+    let out = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .arg(title)
+        .arg(artist)
+        .output()
+        .ok()?;
+    let track = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !track.is_empty()).then_some(track)
+}
+
+/// Wiedergabe steuern – wirkt auf den Player, der gerade läuft.
+pub fn media(command: jarvis_protocol::MediaCommand, service: &str) -> Result<String> {
+    use jarvis_protocol::MediaCommand::*;
+    let done = match command {
+        Play => "Weiter geht's.",
+        Pause => "Pausiert.",
+        Next => "Nächster Titel.",
+        Previous => "Vorheriger Titel.",
+    };
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+            keybd_event, KEYEVENTF_KEYUP, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE,
+            VK_MEDIA_PREV_TRACK,
+        };
+        // Windows kennt nur eine Umschalttaste für Abspielen/Pause.
+        let key = match command {
+            Play | Pause => VK_MEDIA_PLAY_PAUSE,
+            Next => VK_MEDIA_NEXT_TRACK,
+            Previous => VK_MEDIA_PREV_TRACK,
+        } as u8;
+        // SAFETY: keybd_event hat keine Zeiger-Argumente; simuliert eine Medientaste.
+        unsafe {
+            keybd_event(key, 0, 0, 0);
+            keybd_event(key, 0, KEYEVENTF_KEYUP, 0);
+        }
+        let _ = service;
+        Ok(done.to_string())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let app = if service == "spotify" {
+            "Spotify"
+        } else {
+            "Music"
+        };
+        let verb = match command {
+            Play => "play",
+            Pause => "pause",
+            Next => "next track",
+            Previous => "previous track",
+        };
+        let status = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(format!("tell application \"{app}\" to {verb}"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?;
+        if !status.success() {
+            bail!("{app} reagiert nicht.");
+        }
+        Ok(done.to_string())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = service;
+        let verb = match command {
+            Play => "play",
+            Pause => "pause",
+            Next => "next",
+            Previous => "previous",
+        };
+        let status = std::process::Command::new("playerctl")
+            .arg(verb)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| anyhow!("Für die Musiksteuerung bitte „playerctl“ installieren."))?;
+        if !status.success() {
+            bail!("Gerade spielt keine Musik.");
+        }
+        Ok(done.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

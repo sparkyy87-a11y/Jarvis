@@ -57,6 +57,14 @@ struct ChatView: View {
         VStack(spacing: 0) {
             header
             deviceChips
+            JarvisOrb(
+                mode: speech.listening ? .listening : model.orb,
+                level: speech.level,
+                size: model.entries.isEmpty ? 260 : 170
+            )
+            .onTapGesture { speech.toggle { text in model.ask(text, speak: true) } }
+            .padding(.vertical, 6)
+            .animation(.easeInOut(duration: 0.3), value: model.entries.isEmpty)
             messages
             if speech.listening || !speech.partial.isEmpty {
                 Text(speech.partial.isEmpty ? "Ich höre zu …" : speech.partial)
@@ -125,7 +133,7 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     if model.entries.isEmpty {
-                        Text("Tippe aufs Mikrofon und sag zum Beispiel:\n„Öffne Minecraft am PC“\n„Schick die Datei Bericht an mein iPhone“")
+                        Text("Tippe auf den Ring und sag zum Beispiel:\n„Öffne Minecraft am PC“\n„Google Wetter Berlin“\n„Spiel Musik von Adele“")
                             .foregroundStyle(.secondary)
                             .padding()
                     }
@@ -163,16 +171,6 @@ struct ChatView: View {
                 .onSubmit(sendTyped)
             Button(action: sendTyped) { Image(systemName: "paperplane.fill") }
                 .disabled(input.isEmpty)
-            Button {
-                speech.toggle { text in model.ask(text, speak: true) }
-            } label: {
-                Image(systemName: speech.listening ? "waveform" : "mic.fill")
-                    .font(.title2)
-                    .frame(width: 56, height: 56)
-                    .background(speech.listening ? Color.red : Color.accentColor, in: Circle())
-                    .foregroundStyle(.white)
-            }
-            .accessibilityLabel(speech.listening ? "Zuhören beenden" : "Sprechen")
         }
         .padding()
     }

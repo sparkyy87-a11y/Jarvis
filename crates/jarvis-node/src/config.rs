@@ -23,6 +23,24 @@ pub struct Config {
     pub voice: VoiceSection,
     #[serde(default)]
     pub hud: HudSection,
+    #[serde(default)]
+    pub music: MusicSection,
+}
+
+/// Bevorzugter Musikdienst für „spiel …".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MusicSection {
+    /// "apple-music" (Standard), "spotify" oder "youtube-music"
+    pub service: String,
+}
+
+impl Default for MusicSection {
+    fn default() -> Self {
+        Self {
+            service: "apple-music".into(),
+        }
+    }
 }
 
 /// Einstellungen für das Overlay `jarvis-hud`.
@@ -240,6 +258,7 @@ impl Config {
             brain: BrainSection::default(),
             voice: VoiceSection::default(),
             hud: HudSection::default(),
+            music: MusicSection::default(),
         };
         cfg.pairing_key()?;
         Ok(cfg)

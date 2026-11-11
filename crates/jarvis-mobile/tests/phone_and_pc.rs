@@ -26,6 +26,29 @@ impl PlatformBridge for Bridge {
     }
     fn speak(&self, _text: String) {}
     fn file_received(&self, _path: String) {}
+    fn open_url(&self, url: String) -> Reply {
+        self.opened.lock().unwrap().push(url);
+        Reply {
+            ok: true,
+            text: "geöffnet".into(),
+        }
+    }
+    fn play_music(&self, query: String, service: String) -> Reply {
+        self.opened
+            .lock()
+            .unwrap()
+            .push(format!("{service}:{query}"));
+        Reply {
+            ok: true,
+            text: format!("{query} läuft"),
+        }
+    }
+    fn media(&self, command: String) -> Reply {
+        Reply {
+            ok: true,
+            text: command,
+        }
+    }
 }
 
 /// Antwortet auf jede Anfrage wie Ollama mit „öffne Spotify“.
@@ -136,4 +159,15 @@ fn phone_uses_pc_brain_and_sends_files() {
     let content = std::fs::read(&received);
     let _ = std::fs::remove_file(&received);
     assert_eq!(content.unwrap(), b"JPEG...");
+
+    // Vom PC aus Musik auf dem Handy starten und dort pausieren.
+    let r = pc_rt.block_on(pc.handle_text("spiel Musik von Adele auf dem Handy"));
+    assert!(r.ok, "{}", r.text);
+    assert!(bridge
+        .opened
+        .lock()
+        .unwrap()
+        .contains(&"apple-music:Adele".to_string()));
+    let r = pc_rt.block_on(pc.handle_text("Pause am Handy"));
+    assert!(r.ok && r.text.ends_with("pause"), "{}", r.text);
 }

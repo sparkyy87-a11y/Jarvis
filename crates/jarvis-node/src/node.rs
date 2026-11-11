@@ -101,7 +101,10 @@ enum Resolved {
 
 impl Node {
     pub fn new(cfg: Config) -> Result<Arc<Self>> {
-        let host = Arc::new(DesktopHost::new(cfg.apps.clone()));
+        let host = Arc::new(DesktopHost::new(
+            cfg.apps.clone(),
+            cfg.music.service.clone(),
+        ));
         Self::with_host(cfg, host)
     }
 
@@ -707,6 +710,20 @@ impl Node {
             }
             Action::ComputerUse { task } => {
                 bail!("Computer Use ist noch nicht eingebaut (Aufgabe: „{task}“).")
+            }
+            Action::WebSearch { query } => {
+                let (url, host) = (crate::web::google(query), self.host.clone());
+                tokio::task::spawn_blocking(move || host.open_url(&url)).await??;
+                Ok(format!("Ich suche nach „{query}“."))
+            }
+            Action::PlayMusic { query, service } => {
+                let (query, service, host) = (query.clone(), service.clone(), self.host.clone());
+                tokio::task::spawn_blocking(move || host.play_music(&query, service.as_deref()))
+                    .await?
+            }
+            Action::Media { command } => {
+                let (command, host) = (*command, self.host.clone());
+                tokio::task::spawn_blocking(move || host.media(command)).await?
             }
             Action::SendFile { .. } => {
                 bail!("Dateien werden über FileStart/FileChunk empfangen, nicht per Execute.")

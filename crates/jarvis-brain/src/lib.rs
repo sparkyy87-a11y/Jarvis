@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
-use jarvis_protocol::{Action, Command, Folder, Target};
+use jarvis_protocol::{normalize_music_service, Action, Command, Folder, MediaCommand, Target};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -206,6 +206,9 @@ fn system_prompt(here: &str, devices: &[(String, String)]) -> String {
          - target_device ist der Name aus der Liste, auf dem die Aktion passieren soll; leer oder null für das aktuelle Gerät.\n\
          - Bei send_file ist target_device das Empfängergerät und file der Dateiname auf dem aktuellen Gerät.\n\
          - folder: documents, downloads, desktop, pictures, music, videos oder ein relativer Pfad; sonst leer.\n\
+         - web_search: Suchbegriff in text (öffnet Google im Browser des Zielgeräts).\n\
+         - play_music: Titel/Künstler/Album in text, Dienst (apple music, spotify, youtube music) in app oder leer.\n\
+         - media: Wiedergabe steuern; text ist play, pause, next oder previous.\n\
          - computer_use nur für Aufgaben, die echte Bedienung des Bildschirms brauchen; die Aufgabe kommt in text.\n\
          - Ist es eine Frage oder Unterhaltung, nimm action=answer und schreibe die Antwort in reply.\n\
          - Felder, die nicht passen, bleiben leer."
@@ -227,7 +230,7 @@ fn schema(nullable: bool) -> serde_json::Value {
         "additionalProperties": false,
         "required": ["action", "target_device", "app", "file", "folder", "text", "reply"],
         "properties": {
-            "action": {"type": "string", "enum": ["open_app", "close_app", "send_file", "say", "computer_use", "answer"]},
+            "action": {"type": "string", "enum": ["open_app", "close_app", "send_file", "say", "web_search", "play_music", "media", "computer_use", "answer"]},
             "target_device": field("Gerätename aus der Liste, sonst leer"),
             "app": field("App-Name für open_app/close_app"),
             "file": field("Dateiname für send_file"),
@@ -267,6 +270,16 @@ impl RawCommand {
             }),
             "say" => need(self.text).map(|text| Action::Say { text }),
             "computer_use" => need(self.text).map(|task| Action::ComputerUse { task }),
+            "web_search" => need(self.text).map(|query| Action::WebSearch { query }),
+            "play_music" => need(self.text).map(|query| Action::PlayMusic {
+                query,
+                service: self.app.as_deref().and_then(normalize_music_service),
+            }),
+            "media" => self
+                .text
+                .as_deref()
+                .and_then(MediaCommand::from_word)
+                .map(|command| Action::Media { command }),
             _ => None,
         };
         match action {
@@ -344,5 +357,42 @@ mod tests {
     #[test]
     fn local_schema_has_no_null_types() {
         assert!(!schema(false).to_string().contains("null"));
+    }
+
+    #[test]
+    fn music_and_search_from_model() {
+        let raw: RawCommand = serde_json::from_str(
+            r#"{"action":"play_music","target_device":"","app":"Apple Music","file":"","folder":"","text":"Queen","reply":"Queen läuft."}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            raw.into_interpretation(),
+            Interpretation::Command {
+                command: Command {
+                    action: Action::PlayMusic {
+                        query: "Queen".into(),
+                        service: Some("apple-music".into())
+                    },
+                    target: Target::Here
+                },
+                reply: "Queen läuft.".into()
+            }
+        );
+        let raw: RawCommand = serde_json::from_str(
+            r#"{"action":"media","target_device":"PC","app":"","file":"","folder":"","text":"pause","reply":"Pause."}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            raw.into_interpretation(),
+            Interpretation::Command {
+                command: Command {
+                    action: Action::Media {
+                        command: MediaCommand::Pause
+                    },
+                    ..
+                },
+                ..
+            }
+        ));
     }
 }

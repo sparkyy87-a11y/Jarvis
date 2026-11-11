@@ -38,19 +38,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -157,7 +154,10 @@ class MainActivity : ComponentActivity() {
             override fun onReadyForSpeech(params: Bundle?) { listening.value = true }
             override fun onEndOfSpeech() { listening.value = false }
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onRmsChanged(rmsdB: Float) {
+                // Android liefert etwa -2 … 10 dB
+                app.level.value = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -252,6 +252,8 @@ class MainActivity : ComponentActivity() {
         val entries by app.entries.collectAsState()
         val devices by app.devices.collectAsState()
         val isListening by listening.collectAsState()
+        val orbState by app.orb.collectAsState()
+        val level by app.level.collectAsState()
         val share by pendingShare.collectAsState()
         var input by remember { mutableStateOf("") }
         var menu by remember { mutableStateOf(false) }
@@ -294,10 +296,26 @@ class MainActivity : ComponentActivity() {
                     AssistChip(onClick = {}, label = { Text(d.name) }, modifier = Modifier.padding(end = 8.dp))
                 }
             }
+            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                JarvisOrb(
+                    mode = if (isListening) OrbMode.Listening else orbState,
+                    level = level,
+                    size = if (entries.isEmpty()) 260.dp else 170.dp,
+                    onClick = {
+                        if (isListening) {
+                            recognizer?.stopListening()
+                        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            startListening()
+                        } else {
+                            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                )
+            }
             LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp), state = listState) {
                 if (entries.isEmpty()) item {
                     Text(
-                        "Tippe aufs Mikrofon und sag zum Beispiel:\n„Öffne Minecraft am PC“\n„Schick die Datei Bericht an mein Handy“",
+                        "Tippe auf den Ring und sag zum Beispiel:\n„Öffne Minecraft am PC“\n„Google Wetter Berlin“\n„Spiel Musik von Adele“",
                         modifier = Modifier.padding(16.dp),
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -315,18 +333,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                 )
-                Spacer(Modifier.width(8.dp))
-                FloatingActionButton(
-                    onClick = {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                            startListening()
-                        } else {
-                            micPermission.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    },
-                    shape = CircleShape,
-                    containerColor = if (isListening) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                ) { Icon(Icons.Filled.Mic, if (isListening) "Hört zu" else "Sprechen") }
+
             }
         }
 

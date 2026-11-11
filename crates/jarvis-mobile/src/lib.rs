@@ -66,6 +66,12 @@ pub trait PlatformBridge: Send + Sync {
     fn speak(&self, text: String);
     /// Eine Datei ist angekommen (z. B. Benachrichtigung zeigen).
     fn file_received(&self, path: String);
+    /// Adresse öffnen (Browser bzw. zuständige App), z. B. eine Google-Suche.
+    fn open_url(&self, url: String) -> Reply;
+    /// Musik suchen/abspielen. `service`: "apple-music", "spotify", "youtube-music".
+    fn play_music(&self, query: String, service: String) -> Reply;
+    /// Wiedergabe steuern: "play", "pause", "next", "previous".
+    fn media(&self, command: String) -> Reply;
 }
 
 /// Prüft einen Kopplungscode (`jarvis://pair?…`) ohne ihn zu speichern.
@@ -150,6 +156,7 @@ impl Jarvis {
         let host = Arc::new(MobileHost {
             bridge,
             files_dir: files_dir.clone(),
+            music_service: cfg.music.service.clone(),
         });
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -239,6 +246,15 @@ fn parse_platform(p: &str) -> anyhow::Result<Platform> {
 struct MobileHost {
     bridge: Arc<dyn PlatformBridge>,
     files_dir: PathBuf,
+    music_service: String,
+}
+
+fn reply_to_result(r: Reply) -> anyhow::Result<String> {
+    if r.ok {
+        Ok(r.text)
+    } else {
+        bail!(r.text)
+    }
 }
 
 impl Host for MobileHost {
@@ -287,6 +303,25 @@ impl Host for MobileHost {
         self.bridge
             .file_received(path.to_string_lossy().into_owned());
     }
+
+    fn open_url(&self, url: &str) -> anyhow::Result<String> {
+        reply_to_result(self.bridge.open_url(url.to_string()))
+    }
+
+    fn play_music(&self, query: &str, service: Option<&str>) -> anyhow::Result<String> {
+        let service = service.unwrap_or(&self.music_service).to_string();
+        reply_to_result(self.bridge.play_music(query.to_string(), service))
+    }
+
+    fn media(&self, command: jarvis_protocol::MediaCommand) -> anyhow::Result<String> {
+        let word = match command {
+            jarvis_protocol::MediaCommand::Play => "play",
+            jarvis_protocol::MediaCommand::Pause => "pause",
+            jarvis_protocol::MediaCommand::Next => "next",
+            jarvis_protocol::MediaCommand::Previous => "previous",
+        };
+        reply_to_result(self.bridge.media(word.to_string()))
+    }
 }
 
 #[cfg(test)]
@@ -312,6 +347,29 @@ mod tests {
             self.spoken.lock().unwrap().push(text);
         }
         fn file_received(&self, _path: String) {}
+        fn open_url(&self, url: String) -> Reply {
+            self.opened.lock().unwrap().push(url);
+            Reply {
+                ok: true,
+                text: "geöffnet".into(),
+            }
+        }
+        fn play_music(&self, query: String, service: String) -> Reply {
+            self.opened
+                .lock()
+                .unwrap()
+                .push(format!("{service}:{query}"));
+            Reply {
+                ok: true,
+                text: format!("{query} läuft"),
+            }
+        }
+        fn media(&self, command: String) -> Reply {
+            Reply {
+                ok: true,
+                text: command,
+            }
+        }
     }
 
     fn code() -> String {
@@ -338,6 +396,17 @@ mod tests {
         let r = j.ask("öffne Spotify".into());
         assert!(r.ok, "{}", r.text);
         assert_eq!(*bridge.opened.lock().unwrap(), vec!["Spotify".to_string()]);
+        let r = j.ask("google Wetter Berlin".into());
+        assert!(r.ok && r.text.contains("Wetter Berlin"), "{}", r.text);
+        let r = j.ask("spiel Musik von Adele".into());
+        assert_eq!(r.text, "Adele läuft");
+        assert_eq!(
+            bridge.opened.lock().unwrap()[1..],
+            [
+                "https://www.google.com/search?q=Wetter+Berlin".to_string(),
+                "apple-music:Adele".to_string()
+            ]
+        );
         let r = j.ask("schließe Spotify".into());
         assert!(!r.ok);
         // Ohne verbundenen PC kein Sprachmodell für freie Sätze:

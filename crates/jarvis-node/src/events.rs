@@ -45,5 +45,8 @@ pub fn describe(action: &Action) -> String {
         Action::Say { text } => format!("sag „{text}“"),
         Action::SendFile { file, .. } => format!("Datei {file}"),
         Action::ComputerUse { task } => task.clone(),
+        Action::WebSearch { query } => format!("suche nach {query}"),
+        Action::PlayMusic { query, .. } => format!("spiele {query}"),
+        Action::Media { command } => format!("{command:?}").to_lowercase(),
     }
 }

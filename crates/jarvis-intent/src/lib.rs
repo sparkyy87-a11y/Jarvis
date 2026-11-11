@@ -6,7 +6,7 @@
 
 use std::sync::OnceLock;
 
-use jarvis_protocol::{Action, Command, Folder, Target};
+use jarvis_protocol::{normalize_music_service, Action, Command, Folder, MediaCommand, Target};
 use regex::Regex;
 
 /// Versteht `text` als Befehl.
@@ -27,6 +27,49 @@ pub fn parse(text: &str, device_names: &[String]) -> Option<Command> {
     }
 
     let text = strip_fillers(&text);
+
+    for (pattern, command) in [
+        (&MEDIA_PAUSE, MediaCommand::Pause),
+        (&MEDIA_PLAY, MediaCommand::Play),
+        (&MEDIA_NEXT, MediaCommand::Next),
+        (&MEDIA_PREV, MediaCommand::Previous),
+    ] {
+        if re(pattern).is_match(&text) {
+            return Some(Command {
+                action: Action::Media { command },
+                target,
+            });
+        }
+    }
+
+    for pattern in [&SEARCH_GOOGLE, &SEARCH_NACH, &SEARCH_SUFFIX] {
+        if let Some(c) = re(pattern).captures(&text) {
+            let query = unquote(&c["q"]);
+            if query.is_empty() {
+                return None;
+            }
+            return Some(Command {
+                action: Action::WebSearch { query },
+                target,
+            });
+        }
+    }
+
+    for pattern in [&MUSIC_SERVICE, &MUSIC_KIND, &MUSIC_BY] {
+        if let Some(c) = re(pattern).captures(&text) {
+            let query = unquote(&c["q"]);
+            if query.is_empty() {
+                return None;
+            }
+            let service = c
+                .name("svc")
+                .and_then(|s| normalize_music_service(s.as_str()));
+            return Some(Command {
+                action: Action::PlayMusic { query, service },
+                target,
+            });
+        }
+    }
 
     if let Some(c) = re(&SEND).captures(&text) {
         // Eine Datei ohne Zielgerät zu senden ergibt keinen Sinn -> Claude fragen lassen.
@@ -95,6 +138,46 @@ static INTO_FOLDER: Lazy = (
 static HYPHEN_NOUN: Lazy = (
     OnceLock::new(),
     r"(?i)\b(datei|ordner|verzeichnis|file|folder)-",
+);
+static MEDIA_PAUSE: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:pause|pausieren|pausiere|(?:die\s+)?musik\s+(?:pausieren|pause|stoppen|stopp|stop|anhalten|aus)|stopp?e?\s+(?:die\s+)?musik|halt\s+(?:die\s+)?musik\s+an|mach\s+(?:die\s+)?musik\s+aus)$",
+);
+static MEDIA_PLAY: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:weiter(?:spielen)?|fortsetzen|resume|(?:die\s+)?musik\s+(?:weiter|fortsetzen|an)|mach\s+(?:die\s+)?musik\s+(?:weiter|an)|spiele?\s+(?:mir\s+)?musik(?:\s+ab)?)$",
+);
+static MEDIA_NEXT: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:(?:das\s+|den\s+)?nächste[snr]?\s+(?:lied|titel|song|track)|(?:lied|titel|song)\s+überspringen|überspring(?:en)?|skip|next)$",
+);
+static MEDIA_PREV: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:(?:das\s+|den\s+)?vorherige[snr]?\s+(?:lied|titel|song|track)|letzte[snr]?\s+(?:lied|titel|song)|(?:lied|titel|song)\s+zurück|previous)$",
+);
+static SEARCH_GOOGLE: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:google|googel|googl|googele)\s+(?:nach\s+)?(?P<q>.+)$",
+);
+static SEARCH_NACH: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:such|suche|search|look\s+up)\s+(?:(?:im\s+internet|im\s+web|online|bei\s+google|auf\s+google|mit\s+google|in\s+google)\s+)?(?:nach|for)\s+(?P<q>.+?)(?:\s+(?:im\s+internet|im\s+web|online|bei\s+google|auf\s+google|mit\s+google))?$",
+);
+static SEARCH_SUFFIX: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:such|suche|search)\s+(?P<q>.+?)\s+(?:im\s+internet|im\s+web|online|bei\s+google|auf\s+google|mit\s+google)$",
+);
+static MUSIC_SERVICE: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:spiel|spiele|play|hör|höre)\s+(?:mir\s+)?(?:musik\s+von\s+|lieder\s+von\s+|songs\s+von\s+|den\s+song\s+|das\s+lied\s+|das\s+album\s+|die\s+playlist\s+)?(?P<q>.+?)\s+(?:auf|in|mit|bei|über|on|via)\s+(?P<svc>apple\s*music|spotify|youtube\s*music)$",
+);
+static MUSIC_KIND: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:spiel|spiele|play|hör|höre)\s+(?:mir\s+)?(?:(?:musik|lieder|songs|etwas|was|music)\s+von|den\s+song|das\s+lied|den\s+titel|das\s+album|die\s+playlist)\s+(?P<q>.+)$",
+);
+static MUSIC_BY: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:spiel|spiele|play)\s+(?:mir\s+)?(?P<q>.+?\s+(?:von|by)\s+.+)$",
 );
 static OPEN_PREFIX: Lazy = (
     OnceLock::new(),
@@ -359,5 +442,101 @@ mod tests {
     fn unknown_goes_to_brain() {
         assert_eq!(p("wie wird das Wetter morgen"), None);
         assert_eq!(p(""), None);
+    }
+
+    fn music(q: &str, svc: Option<&str>, target: Target) -> Option<Command> {
+        Some(Command {
+            action: Action::PlayMusic {
+                query: q.into(),
+                service: svc.map(String::from),
+            },
+            target,
+        })
+    }
+
+    #[test]
+    fn web_search() {
+        let search = |q: &str, t: Target| {
+            Some(Command {
+                action: Action::WebSearch { query: q.into() },
+                target: t,
+            })
+        };
+        assert_eq!(
+            p("Jarvis, google Wetter Berlin"),
+            search("Wetter Berlin", Target::Here)
+        );
+        assert_eq!(
+            p("such nach Rezept für Lasagne"),
+            search("Rezept für Lasagne", Target::Here)
+        );
+        assert_eq!(
+            p("suche im Internet nach Rust Tutorial"),
+            search("Rust Tutorial", Target::Here)
+        );
+        assert_eq!(
+            p("such Kinoprogramm Hamburg bei Google"),
+            search("Kinoprogramm Hamburg", Target::Here)
+        );
+        assert_eq!(
+            p("such nach Minecraft Mods am PC"),
+            search("Minecraft Mods", Target::Named("pc".into()))
+        );
+        assert_eq!(
+            p("search for rust async"),
+            search("rust async", Target::Here)
+        );
+    }
+
+    #[test]
+    fn play_music() {
+        assert_eq!(
+            p("spiel Thunderstruck von AC/DC"),
+            music("Thunderstruck von AC/DC", None, Target::Here)
+        );
+        assert_eq!(
+            p("spiel Musik von Adele auf Apple Music"),
+            music("Adele", Some("apple-music"), Target::Here)
+        );
+        assert_eq!(
+            p("spiele bitte Musik von Queen"),
+            music("Queen", None, Target::Here)
+        );
+        assert_eq!(
+            p("spiel das Lied Bohemian Rhapsody auf Spotify"),
+            music("Bohemian Rhapsody", Some("spotify"), Target::Here)
+        );
+        assert_eq!(
+            p("spiel die Playlist Workout am PC"),
+            music("Workout", None, Target::Named("pc".into()))
+        );
+        // Spiele bleiben Apps:
+        assert_eq!(p("spiel Minecraft"), open("Minecraft", Target::Here));
+    }
+
+    #[test]
+    fn media_control() {
+        let media = |c: MediaCommand, t: Target| {
+            Some(Command {
+                action: Action::Media { command: c },
+                target: t,
+            })
+        };
+        assert_eq!(p("Pause"), media(MediaCommand::Pause, Target::Here));
+        assert_eq!(
+            p("Jarvis, stopp die Musik!"),
+            media(MediaCommand::Pause, Target::Here)
+        );
+        assert_eq!(
+            p("mach die Musik am PC aus"),
+            media(MediaCommand::Pause, Target::Named("pc".into()))
+        );
+        assert_eq!(p("weiter"), media(MediaCommand::Play, Target::Here));
+        assert_eq!(p("spiel Musik"), media(MediaCommand::Play, Target::Here));
+        assert_eq!(p("nächstes Lied"), media(MediaCommand::Next, Target::Here));
+        assert_eq!(
+            p("das vorherige Lied"),
+            media(MediaCommand::Previous, Target::Here)
+        );
     }
 }

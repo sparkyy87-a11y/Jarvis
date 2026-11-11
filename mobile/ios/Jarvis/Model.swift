@@ -25,9 +25,12 @@ final class JarvisModel: ObservableObject {
     @Published var entries: [Entry] = []
     @Published var devices: [Device] = []
     @Published var message: String?
+    /// Zustand des Rings (Zuhören setzt die Ansicht selbst).
+    @Published var orb: OrbMode = .idle
 
     private(set) var jarvis: Jarvis?
     private let synthesizer = AVSpeechSynthesizer()
+    private let speechDelegate = SpeechDelegate()
     private var pollTask: Task<Void, Never>?
 
     /// Kopplung (mit Schlüssel) – privat, nicht in der Dateien-App sichtbar.
@@ -47,6 +50,13 @@ final class JarvisModel: ObservableObject {
     var deviceName: String { UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone" }
 
     init() {
+        synthesizer.delegate = speechDelegate
+        speechDelegate.onChange = { [weak self] speaking in
+            Task { @MainActor in
+                guard let self else { return }
+                if speaking { self.orb = .speaking } else if self.orb == .speaking { self.orb = .idle }
+            }
+        }
         paired = isPaired(dataDir: Self.dataDir)
         if paired { start() }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -108,10 +118,20 @@ final class JarvisModel: ObservableObject {
             add(Entry(fromUser: false, text: "Noch nicht verbunden.", ok: false))
             return
         }
+        orb = .thinking
         Task.detached {
             let r = jarvis.ask(text: t)
             await MainActor.run {
                 self.add(Entry(fromUser: false, text: r.text, ok: r.ok))
+                if !r.ok {
+                    self.orb = .error
+                    Task {
+                        try? await Task.sleep(for: .seconds(2.5))
+                        if self.orb == .error { self.orb = .idle }
+                    }
+                } else if !speak {
+                    self.orb = .idle
+                }
                 if speak { self.say(r.text) }
             }
         }
@@ -158,4 +178,12 @@ final class JarvisModel: ObservableObject {
             }
         }
     }
+}
+
+/// Meldet, wann die Sprachausgabe beginnt und endet (für den Ring).
+final class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate {
+    var onChange: ((Bool) -> Void)?
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) { onChange?(true) }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) { onChange?(false) }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) { onChange?(false) }
 }

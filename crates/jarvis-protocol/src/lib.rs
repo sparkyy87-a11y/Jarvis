@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Version des Drahtprotokolls. Wird im `Hello` ausgetauscht.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Größe eines Datei-Chunks. Muss zusammen mit dem Frame-Overhead unter die
 /// Noise-Grenze von 65 535 Byte pro Nachricht passen.
@@ -159,6 +159,58 @@ pub enum Action {
     ComputerUse {
         task: String,
     },
+    /// Im Browser suchen (Google).
+    WebSearch {
+        query: String,
+    },
+    /// Musik abspielen; `service`: "apple-music", "spotify", "youtube-music"
+    /// oder `None` für den eingestellten Dienst.
+    PlayMusic {
+        query: String,
+        service: Option<String>,
+    },
+    /// Wiedergabe steuern (Pause, weiter, nächstes Lied …).
+    Media {
+        command: MediaCommand,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MediaCommand {
+    Play,
+    Pause,
+    Next,
+    Previous,
+}
+
+impl MediaCommand {
+    pub fn from_word(s: &str) -> Option<Self> {
+        Some(match s.trim().to_lowercase().as_str() {
+            "play" | "weiter" | "fortsetzen" | "resume" => MediaCommand::Play,
+            "pause" | "stop" | "stopp" | "anhalten" => MediaCommand::Pause,
+            "next" | "nächstes" | "skip" | "weiter_lied" => MediaCommand::Next,
+            "previous" | "zurück" | "vorheriges" | "prev" => MediaCommand::Previous,
+            _ => return None,
+        })
+    }
+}
+
+/// Dienstnamen vereinheitlichen: „Apple Music" -> "apple-music".
+pub fn normalize_music_service(s: &str) -> Option<String> {
+    let k: String = s
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
+    Some(
+        match k.as_str() {
+            "applemusic" | "apple" | "itunes" | "musik" => "apple-music",
+            "spotify" => "spotify",
+            "youtubemusic" | "youtube" => "youtube-music",
+            _ => return None,
+        }
+        .to_string(),
+    )
 }
 
 /// Auf welchem Gerät eine Aktion stattfinden soll.
