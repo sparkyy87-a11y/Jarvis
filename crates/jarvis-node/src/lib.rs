@@ -7,6 +7,7 @@
 //! - [`discovery`]: Geräte im LAN per mDNS finden
 //! - [`control`]: lokale Schnittstelle für CLI, Sprach- und App-Oberflächen
 
+pub mod autostart;
 pub mod config;
 pub mod control;
 pub mod discovery;

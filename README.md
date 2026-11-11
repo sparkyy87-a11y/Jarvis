@@ -27,6 +27,7 @@ Regeln einen Satz nicht verstehen.
 | Dateien senden, mit Prüfsumme, in bekannte Ordner | ✅ |
 | Sprachausgabe über die Systemstimme | ✅ |
 | Spracheingabe: „Jarvis, …" + Whisper lokal, optional auf der Grafikkarte | ✅ |
+| Startet automatisch mit Windows/macOS/Linux, ohne Fenster | ✅ |
 | Computer Use (Claude bedient den Bildschirm) | Phase 3 |
 | Apps für iOS, iPadOS, Android | Phase 4 |
 | Zugriff von unterwegs (Relay) | Phase 5 |
@@ -75,6 +76,21 @@ Schlüssel gesetzt, nimmt Jarvis automatisch Claude.
 
 **Windows:** Beim ersten Start fragt die Firewall nach Port 7879. Für das Heimnetz
 (privates Netzwerk) erlauben.
+
+## Automatisch starten
+
+```bash
+jarvisd autostart an       # jetzt starten und bei jeder Anmeldung, ohne Fenster
+jarvisd autostart status
+jarvisd autostart aus      # austragen und beenden
+```
+
+Dahinter steckt `jarvis-hintergrund`: Es startet `jarvisd` und `jarvis-listen`
+unsichtbar, startet sie nach einem Absturz neu und schreibt Logs nach
+`%LOCALAPPDATA%\jarvis\logs` (macOS/Linux: `~/.local/share/jarvis/logs` bzw.
+`~/Library/Application Support/jarvis/logs`). Eingetragen wird unter Windows
+der „Ausführen"-Schlüssel des Benutzers – keine Adminrechte nötig. Soll nur
+`jarvisd` ohne Spracheingabe starten: `enabled = false` unter `[voice]`.
 
 ## Spracheingabe
 
@@ -140,6 +156,7 @@ mdns = true
 minecraft = 'C:\XboxGames\Minecraft Launcher\Content\Minecraft.exe'
 
 [voice]
+enabled = true                     # beim Autostart mitstarten
 language = "de"
 wake_words = ["jarvis"]
 # input_device = "USB"             # Teil des Mikrofonnamens
@@ -198,9 +215,8 @@ Gattungsname („PC", „iPad", „Handy"). Passen zwei Geräte, fragt Jarvis na
 
 ## Fahrplan
 
-**Phase 2 – Sprache (erledigt).** Als Nächstes: Jarvis startet automatisch mit
-Windows, eine natürlichere Stimme für die Antworten, und Whisper-Halluzinationen
-weiter zähmen.
+**Phase 2 – Sprache (erledigt).** Offen: eine natürlichere Stimme für die
+Antworten und Whisper-Halluzinationen weiter zähmen.
 
 **Phase 3 – Computer Use.** Für Aufgaben ohne festen Befehl („trag den Termin in
 meinen Kalender ein"): Bildschirmfotos (`xcap`), Maus/Tastatur (`enigo`) und

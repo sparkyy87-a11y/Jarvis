@@ -180,7 +180,11 @@ fn say_commands(text: &str) -> Vec<std::process::Command> {
 /// Liest Text mit der Systemstimme vor und wartet, bis er gesprochen ist.
 pub fn say_blocking(text: &str) -> Result<()> {
     for mut cmd in say_commands(text) {
-        match cmd.stdout(Stdio::null()).stderr(Stdio::null()).status() {
+        match crate::autostart::quiet(&mut cmd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
             Ok(s) if s.success() => return Ok(()),
             Ok(_) => bail!("Sprachausgabe fehlgeschlagen"),
             Err(_) => continue, // Programm nicht installiert -> nächstes probieren
@@ -205,7 +209,8 @@ fn spawn_shell(cmd: &str) -> Result<()> {
         c.args(["-c", cmd]);
         c
     };
-    c.stdout(Stdio::null())
+    crate::autostart::quiet(&mut c)
+        .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| anyhow!("Start fehlgeschlagen: {e}"))?;

@@ -10,6 +10,10 @@ name = "jarvisd"
 path = "src/bin/jarvisd.rs"
 
 [[bin]]
+name = "jarvis-hintergrund"
+path = "src/bin/jarvis-hintergrund.rs"
+
+[[bin]]
 name = "jarvis"
 path = "src/bin/jarvis.rs"
 

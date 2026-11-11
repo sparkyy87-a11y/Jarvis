@@ -50,4 +50,6 @@ jobs:
             target/release/jarvis.exe
             target/release/jarvis-listen
             target/release/jarvis-listen.exe
+            target/release/jarvis-hintergrund
+            target/release/jarvis-hintergrund.exe
           if-no-files-found: ignore

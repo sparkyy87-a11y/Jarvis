@@ -50,11 +50,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ziel = Join-Path (Get-Location) "dist"
 New-Item -ItemType Directory -Force $ziel | Out-Null
-foreach ($exe in "jarvisd.exe", "jarvis.exe", "jarvis-listen.exe") {
+foreach ($exe in "jarvisd.exe", "jarvis.exe", "jarvis-listen.exe", "jarvis-hintergrund.exe") {
     Copy-Item "target\release\$exe" $ziel -Force
 }
 Write-Host ""
 Write-Host "Fertig: $ziel" -ForegroundColor Green
 Write-Host "  dist\jarvisd.exe init --name Gaming-PC   (einmalig)"
-Write-Host "  dist\jarvisd.exe                          (Dienst)"
-Write-Host "  dist\jarvis-listen.exe                    (Spracheingabe)"
+Write-Host "  dist\jarvisd.exe autostart an             (startet Jarvis jetzt und bei jeder Anmeldung)"

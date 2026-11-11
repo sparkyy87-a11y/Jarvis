@@ -27,6 +27,8 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VoiceSection {
+    /// Spracheingabe beim Autostart mitstarten.
+    pub enabled: bool,
     /// Whisper-Modell, z. B. "large-v3-turbo-q5_0" (Grafikkarte) oder
     /// "small-q5_1" (nur Prozessor). Leer = automatisch passend zum Build.
     pub model: Option<String>,
@@ -44,6 +46,7 @@ pub struct VoiceSection {
 impl Default for VoiceSection {
     fn default() -> Self {
         Self {
+            enabled: true,
             model: None,
             language: "de".into(),
             wake_words: vec!["jarvis".into()],

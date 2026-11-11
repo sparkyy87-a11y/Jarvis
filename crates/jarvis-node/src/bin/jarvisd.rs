@@ -32,11 +32,24 @@ enum Cmd {
     },
     /// Pairing-Schlüssel anzeigen (für `jarvisd join` auf anderen Geräten).
     Key,
+    /// Jarvis beim Anmelden automatisch starten: an, aus oder status.
+    Autostart {
+        #[arg(value_enum, default_value = "status")]
+        mode: AutostartMode,
+    },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum AutostartMode {
+    An,
+    Aus,
+    Status,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
@@ -50,7 +63,31 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Run => run().await,
+        Cmd::Autostart { mode } => autostart_cmd(mode),
     }
+}
+
+fn autostart_cmd(mode: AutostartMode) -> Result<()> {
+    use jarvis_node::autostart;
+    match mode {
+        AutostartMode::An => {
+            autostart::enable()?;
+            println!("Jarvis startet jetzt und künftig bei jeder Anmeldung (ohne Fenster).");
+        }
+        AutostartMode::Aus => {
+            autostart::disable()?;
+            println!("Autostart entfernt, Jarvis im Hintergrund beendet.");
+        }
+        AutostartMode::Status => {}
+    }
+    let s = autostart::status()?;
+    println!(
+        "Autostart: {} · läuft: {} · Logs: {}",
+        if s.enabled { "an" } else { "aus" },
+        if s.running { "ja" } else { "nein" },
+        s.logs.display()
+    );
+    Ok(())
 }
 
 fn setup(name: Option<String>, key: Option<String>) -> Result<()> {
