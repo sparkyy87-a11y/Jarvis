@@ -29,7 +29,7 @@ Regeln einen Satz nicht verstehen.
 | Spracheingabe: „Jarvis, …" + Whisper lokal, optional auf der Grafikkarte | ✅ |
 | Startet automatisch mit Windows/macOS/Linux, ohne Fenster | ✅ |
 | Computer Use (Claude bedient den Bildschirm) | Phase 3 |
-| Apps für iOS, iPadOS, Android | Phase 4 |
+| Apps für Android, iPhone und iPad (Mikrofon-Taste, Dateien, Kopplung per QR-Code) | ✅ |
 | Zugriff von unterwegs (Relay) | Phase 5 |
 
 ## Schnellstart
@@ -91,6 +91,51 @@ unsichtbar, startet sie nach einem Absturz neu und schreibt Logs nach
 `~/Library/Application Support/jarvis/logs`). Eingetragen wird unter Windows
 der „Ausführen"-Schlüssel des Benutzers – keine Adminrechte nötig. Soll nur
 `jarvisd` ohne Spracheingabe starten: `enabled = false` unter `[voice]`.
+
+## Handy und Tablet
+
+Die Apps für **Android** (`mobile/android`) und **iPhone/iPad** (`mobile/ios`)
+nutzen denselben Rust-Kern wie der PC – gleiche Verschlüsselung, gleiche
+Befehle, gleiche Dateiübertragung.
+
+**Koppeln:** Am PC `jarvisd pair` ausführen und den QR-Code mit der normalen
+Kamera-App scannen. Jarvis öffnet sich und ist gekoppelt.
+
+**Was geht:**
+- Mikrofon-Taste: „Öffne Minecraft am PC", „Schick die Datei Bericht an mein Handy"
+  – erkannt von der Spracherkennung des Handys (auf dem Gerät, kostenlos)
+- Freie Sätze deutet das Sprachmodell auf dem PC (Ollama) – das Handy fragt es einfach
+- Dateien senden: Büroklammer in der App, auf Android auch „Teilen → Jarvis"
+- Dateien empfangen: Android mit Benachrichtigung; iPhone in der Dateien-App
+  unter „Auf meinem iPhone › Jarvis"
+- „Öffne Spotify am Handy": Android startet jede installierte App; iOS nur
+  Apps mit bekanntem Link (Spotify, YouTube, WhatsApp, Netflix, Karten, …)
+
+**Grenzen der Systeme:** Ein Dauer-Weckwort („Jarvis" ohne Taste) erlauben
+Android und iOS fremden Apps nicht stromsparend – auf dem Handy gibt es deshalb
+die Mikrofon-Taste. Android bleibt über eine dezente Dauer-Benachrichtigung für
+den PC erreichbar; iOS hält Apps im Hintergrund an, auf dem iPhone ist Jarvis
+also erreichbar, solange die App offen ist.
+
+### Android installieren
+
+Die fertige APK baut GitHub bei jedem Push: **Actions › Android › neuester Lauf ›
+Artifacts › jarvis-android-apk**. Auf dem Handy öffnen und „Installation aus
+unbekannten Quellen" für den Browser/Dateimanager erlauben.
+
+Selbst bauen: Android SDK + NDK, `cargo install cargo-ndk`, dann
+`cd mobile/android && ./gradlew assembleRelease`.
+
+### iPhone/iPad installieren
+
+Apple lässt Apps außerhalb des App Stores nur signiert auf Geräte. Wege:
+- **Mit Mac:** `mobile/ios/build-rust.sh`, dann `cd mobile/ios && xcodegen`,
+  `Jarvis.xcodeproj` öffnen, unter *Signing* die eigene Apple-ID wählen und aufs
+  iPhone spielen. Mit kostenloser Apple-ID läuft die App 7 Tage, dann neu aufspielen.
+- **Ohne Mac (Windows):** Die unsignierte `.ipa` aus **Actions › iOS › Artifacts**
+  mit [Sideloadly](https://sideloadly.io) oder AltStore und der eigenen Apple-ID
+  aufs iPhone bringen (ebenfalls 7 Tage gültig, danach erneut).
+- Dauerhaft und bequem (TestFlight) geht es mit einem Apple-Developer-Konto (99 €/Jahr).
 
 ## Spracheingabe
 
@@ -191,6 +236,9 @@ provider = "auto"                  # auto | ollama | claude | off
 | `jarvis-brain` | Sprachmodell für freie Sätze: Ollama (lokal) oder Claude, festes JSON-Schema |
 | `jarvis-node` | `jarvisd` und `jarvis`: Mesh, Routing, Ausführung, Dateiübertragung |
 | `jarvis-voice` | `jarvis-listen`: Mikrofon, Silero-VAD, Whisper, Weckwort |
+| `jarvis-mobile` | Kern für die Handy-Apps (UniFFI → Kotlin/Swift) |
+| `mobile/android` | Android-App (Kotlin, Jetpack Compose) |
+| `mobile/ios` | iPhone/iPad-App (SwiftUI) |
 
 **Warum so schnell:** Die häufigen Befehle erkennt `jarvis-intent` per Regex in
 Mikrosekunden, ohne Netz. Die Geräte halten eine dauerhafte, verschlüsselte
@@ -223,13 +271,8 @@ meinen Kalender ein"): Bildschirmfotos (`xcap`), Maus/Tastatur (`enigo`) und
 Claude mit dem Computer-Use-Toolset (`computer_toolset_20260801`) in einer
 Schleife – mit Rückfrage vor riskanten Schritten.
 
-**Phase 4 – Mobile Apps.** Die Crates sind plattformneutral und werden per
-UniFFI in eine Swift-App (iOS/iPadOS) und eine Kotlin-App (Android) eingebunden.
-Einschränkungen, die man kennen muss:
-- iOS/iPadOS erlauben keinen dauerhaften Hintergrunddienst; Jarvis ist dort
-  aktiv, solange die App offen ist (oder über Siri-Kurzbefehle/App Intents).
-- Andere Apps öffnen geht auf iOS nur über URL-Schemata und Kurzbefehle;
-  Android kann Apps per Intent starten.
+**Phase 4 – Mobile Apps (erledigt).** Offen: „Teilen → Jarvis" auch auf iOS
+(Share-Extension), Siri-Kurzbefehl „Hey Siri, Jarvis …".
 
 **Phase 5 – Unterwegs.** Ein kleiner Relay-Server (oder Tailscale/WireGuard),
 damit „schick die Datei an den PC" auch aus dem Mobilfunknetz geht.
@@ -241,4 +284,5 @@ cargo test                 # Unit-Tests
 cargo clippy --all-targets
 ./scripts/e2e.sh           # zwei Geräte lokal: Fernstart + Dateiübertragung
 ./scripts/voice-e2e.sh     # dasselbe per Sprache (braucht espeak-ng, ffmpeg)
+cd mobile/android && ./gradlew :bindings-test:test   # Kotlin-Anbindung gegen echten jarvisd
 ```
