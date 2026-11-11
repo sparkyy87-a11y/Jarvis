@@ -85,14 +85,14 @@ impl<D: SpeechDetector> Segmenter<D> {
     pub fn push(&mut self, samples: &[f32]) -> Vec<Vec<f32>> {
         self.pending.extend_from_slice(samples);
         let mut done = Vec::new();
-        let frames = self.pending.len() / FRAME;
         let pending = std::mem::take(&mut self.pending);
-        for frame in pending.chunks_exact(FRAME).take(frames) {
+        let (frames, rest) = pending.as_chunks::<FRAME>();
+        for frame in frames {
             if let Some(seg) = self.on_frame(frame) {
                 done.push(seg);
             }
         }
-        self.pending = pending[frames * FRAME..].to_vec();
+        self.pending = rest.to_vec();
         done
     }
 

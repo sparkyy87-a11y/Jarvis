@@ -25,13 +25,9 @@ jobs:
         run: cargo install cargo-ndk --locked
       - name: Kotlin-Anbindung gegen echten jarvisd testen
         working-directory: mobile/android
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: ./gradlew :bindings-test:test --console=plain
       - name: APK bauen
         working-directory: mobile/android
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
         run: ./gradlew :app:assembleRelease --console=plain
       - uses: actions/upload-artifact@v4
         with:
