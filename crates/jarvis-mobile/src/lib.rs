@@ -20,7 +20,9 @@ use jarvis_protocol::{Action, Command, Folder, Platform, Target};
 
 uniffi::setup_scaffolding!();
 
+/// „Flach": Kotlin/Swift sehen nur den Text (`e.message` bzw. `localizedDescription`).
 #[derive(Debug, thiserror::Error, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum JarvisError {
     #[error("{message}")]
     Failed { message: String },
