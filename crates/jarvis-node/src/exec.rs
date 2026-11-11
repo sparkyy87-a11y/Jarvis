@@ -212,6 +212,11 @@ fn spawn_shell(cmd: &str) -> Result<()> {
     Ok(())
 }
 
+// Auf macOS öffnet `open -a` Apps direkt; dort wird die Endung nicht gebraucht.
+#[cfg_attr(
+    any(target_os = "macos", target_os = "ios", target_os = "android"),
+    allow(dead_code)
+)]
 fn ext(p: &Path) -> String {
     p.extension()
         .and_then(|e| e.to_str())
