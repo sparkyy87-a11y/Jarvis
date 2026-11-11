@@ -17,6 +17,11 @@ path = "src/bin/jarvis-hintergrund.rs"
 name = "jarvis"
 path = "src/bin/jarvis.rs"
 
+[features]
+default = ["desktop"]
+# Prozessliste für „schließe <App>" (nicht auf dem Handy nötig)
+desktop = ["dep:sysinfo"]
+
 [dependencies]
 jarvis-protocol.workspace = true
 jarvis-intent.workspace = true
@@ -39,7 +44,7 @@ toml = "0.8"
 dirs = "6"
 clap = { version = "4", features = ["derive"] }
 mdns-sd = "0.11"
-sysinfo = "0.30"
+sysinfo = { version = "0.30", optional = true }
 gethostname = "0.5"
 qrcode = { version = "0.14", default-features = false }
 

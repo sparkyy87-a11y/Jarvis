@@ -132,6 +132,13 @@ fn platform_open(app: &str) -> Result<()> {
 }
 
 /// Beendet alle Prozesse, deren Name zur App passt.
+#[cfg(not(feature = "desktop"))]
+pub fn close_app(app: &str) -> Result<String> {
+    bail!("{app} kann ich auf diesem Gerät nicht schließen.")
+}
+
+/// Beendet alle Prozesse, deren Name zur App passt.
+#[cfg(feature = "desktop")]
 pub fn close_app(app: &str) -> Result<String> {
     use sysinfo::System;
     let wanted = squash(app);

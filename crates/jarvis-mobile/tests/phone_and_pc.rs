@@ -102,7 +102,7 @@ fn phone_uses_pc_brain_and_sends_files() {
     phone_cfg.save_to(&cfg_path).unwrap();
 
     let bridge = Arc::new(Bridge::default());
-    let phone = Jarvis::start(d, bridge.clone()).unwrap();
+    let phone = Jarvis::start(d, None, bridge.clone()).unwrap();
     let t = Instant::now();
     while !phone.devices().iter().any(|d| d.name == "Gaming-PC") {
         assert!(

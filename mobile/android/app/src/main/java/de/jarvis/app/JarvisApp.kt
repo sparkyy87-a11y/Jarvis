@@ -74,7 +74,7 @@ class JarvisApp : Application() {
         val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         multicastLock = wifi.createMulticastLock("jarvis").apply { setReferenceCounted(false); acquire() }
         return try {
-            jarvis = Jarvis.start(dataDir, AndroidBridge(this))
+            jarvis = Jarvis.start(dataDir, null, AndroidBridge(this))
             paired.value = true
             JarvisService.start(this)
             null

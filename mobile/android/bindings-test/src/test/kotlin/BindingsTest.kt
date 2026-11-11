@@ -34,7 +34,7 @@ class BindingsTest {
         assertTrue(e.message!!.contains("kein Jarvis-Kopplungscode"), e.message)
         val dir = Files.createTempDirectory("phone").toString()
         assertFalse(isPaired(dir))
-        assertFailsWith<JarvisException> { Jarvis.start(dir, FakeBridge()) }
+        assertFailsWith<JarvisException> { Jarvis.start(dir, null, FakeBridge()) }
     }
 
     @Test
@@ -70,7 +70,7 @@ class BindingsTest {
             phoneCfg.writeText(phoneCfg.readText().replace("mdns = true", "mdns = false"))
 
             val bridge = FakeBridge()
-            val phone = Jarvis.start(phoneDir, bridge)
+            val phone = Jarvis.start(phoneDir, null, bridge)
             val until = System.currentTimeMillis() + 15_000
             while (phone.devices().none { it.name == "Gaming-PC" }) {
                 check(System.currentTimeMillis() < until) { "Handy findet den PC nicht:\n" + File(pcHome, "pc.log").readText() }

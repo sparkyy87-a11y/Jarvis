@@ -10,7 +10,7 @@ crate-type = ["cdylib", "staticlib", "lib"]
 name = "jarvis_mobile"
 
 [dependencies]
-jarvis-node = { path = "../jarvis-node" }
+jarvis-node = { path = "../jarvis-node", default-features = false }
 jarvis-protocol.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

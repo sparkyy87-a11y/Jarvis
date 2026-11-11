@@ -1,0 +1,40 @@
+# Baut die iPhone-/iPad-App: Rust-Kern als XCFramework, Xcode-Projekt per
+# XcodeGen, Build für echte Geräte (unsigniert) und .ipa zum Herunterladen.
+name: iOS
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  app:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - run: brew install xcodegen
+      - name: Rust-Kern als XCFramework
+        run: ./mobile/ios/build-rust.sh
+      - name: Xcode-Projekt erzeugen
+        working-directory: mobile/ios
+        run: xcodegen
+      - name: Für iPhone/iPad bauen (unsigniert)
+        working-directory: mobile/ios
+        run: |
+          xcodebuild -project Jarvis.xcodeproj -target Jarvis -configuration Release \
+            -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build | tail -40
+          test -d build/Release-iphoneos/Jarvis.app
+      - name: .ipa packen (zum Signieren mit Sideloadly/AltStore)
+        working-directory: mobile/ios
+        run: |
+          mkdir -p Payload && cp -R build/Release-iphoneos/Jarvis.app Payload/
+          zip -qr Jarvis-unsigned.ipa Payload && ls -la Jarvis-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-ios-unsigned-ipa
+          path: mobile/ios/Jarvis-unsigned.ipa

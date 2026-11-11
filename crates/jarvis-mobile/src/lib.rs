@@ -129,11 +129,13 @@ pub struct Jarvis {
 
 #[uniffi::export]
 impl Jarvis {
-    /// Startet Jarvis auf dem Handy. `data_dir` ist ein privater App-Ordner;
-    /// empfangene Dateien landen darunter in `Jarvis/`.
+    /// Startet Jarvis auf dem Handy. `data_dir` ist ein privater App-Ordner
+    /// (Kopplung). Empfangene Dateien landen in `files_dir` – ohne Angabe in
+    /// `data_dir/Jarvis` (iOS übergibt „Dokumente", sichtbar in der Dateien-App).
     #[uniffi::constructor]
     pub fn start(
         data_dir: String,
+        files_dir: Option<String>,
         bridge: Arc<dyn PlatformBridge>,
     ) -> Result<Arc<Self>, JarvisError> {
         let cfg = Config::load_from(&config_path(&data_dir)).map_err(|_| JarvisError::Failed {
@@ -141,7 +143,9 @@ impl Jarvis {
                 "Noch nicht gekoppelt – am PC `jarvisd pair` ausführen und den QR-Code scannen."
                     .into(),
         })?;
-        let files_dir = PathBuf::from(&data_dir).join("Jarvis");
+        let files_dir = files_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(&data_dir).join("Jarvis"));
         std::fs::create_dir_all(&files_dir).map_err(anyhow::Error::from)?;
         let host = Arc::new(MobileHost {
             bridge,
@@ -322,14 +326,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path().to_string_lossy().to_string();
         assert!(!is_paired(d.clone()));
-        assert!(Jarvis::start(d.clone(), Arc::new(FakeBridge::default())).is_err());
+        assert!(Jarvis::start(d.clone(), None, Arc::new(FakeBridge::default())).is_err());
 
         let info = pair(d.clone(), "Handy".into(), "android".into(), code()).unwrap();
         assert_eq!(info.name, "Gaming-PC");
         assert!(is_paired(d.clone()));
 
         let bridge = Arc::new(FakeBridge::default());
-        let j = Jarvis::start(d.clone(), bridge.clone()).unwrap();
+        let j = Jarvis::start(d.clone(), None, bridge.clone()).unwrap();
         assert_eq!(j.device_name(), "Handy");
         let r = j.ask("öffne Spotify".into());
         assert!(r.ok, "{}", r.text);
