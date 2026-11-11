@@ -47,6 +47,9 @@ struct Cli {
     /// Whisper-Modell (Name oder Pfad), z. B. "large-v3-turbo-q5_0".
     #[arg(long)]
     modell: Option<String>,
+    /// Nur die Modelle herunterladen und beenden (für den Installer).
+    #[arg(long)]
+    nur_modelle: bool,
 }
 
 type Detector = Box<dyn SpeechDetector + Send>;
@@ -141,6 +144,11 @@ fn main() -> Result<()> {
         .or(voice.model.clone())
         .unwrap_or_else(|| jarvis_voice::default_model().into());
     let model = models::ensure(&model_name)?;
+    if cli.nur_modelle {
+        models::ensure(models::VAD_MODEL)?;
+        println!("Modelle bereit: {model_name}, {}", models::VAD_MODEL);
+        return Ok(());
+    }
     let started = Instant::now();
     let stt = Transcriber::load(&model, &voice.language)?;
     info!(

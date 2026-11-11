@@ -25,12 +25,16 @@ enum Cmd {
         /// Name dieses Geräts, z. B. "Gaming-PC" oder "Laptop".
         #[arg(long)]
         name: Option<String>,
+        #[command(flatten)]
+        opts: SetupOpts,
     },
     /// Dieses Gerät mit einem vorhandenen Jarvis koppeln (Code aus `jarvisd pair`).
     Join {
         code: String,
         #[arg(long)]
         name: Option<String>,
+        #[command(flatten)]
+        opts: SetupOpts,
     },
     /// Einmal-Code und QR-Code zum Koppeln eines weiteren Geräts anzeigen.
     Pair,
@@ -43,6 +47,36 @@ enum Cmd {
         #[arg(value_enum, default_value = "status")]
         mode: AutostartMode,
     },
+}
+
+/// Auswahl aus dem Installer.
+#[derive(clap::Args, Clone)]
+struct SetupOpts {
+    /// Spracheingabe nicht automatisch starten.
+    #[arg(long)]
+    ohne_sprache: bool,
+    /// HUD nicht automatisch starten.
+    #[arg(long)]
+    ohne_hud: bool,
+    /// Lokales Sprachmodell (Ollama), z. B. "qwen2.5:7b".
+    #[arg(long)]
+    sprachmodell: Option<String>,
+    /// Kein eigenes Sprachmodell – freie Sätze deutet ein anderes Gerät (z. B. der PC).
+    #[arg(long, conflicts_with = "sprachmodell")]
+    ohne_sprachmodell: bool,
+}
+
+impl SetupOpts {
+    fn apply(self, cfg: &mut Config) {
+        cfg.voice.enabled = !self.ohne_sprache;
+        cfg.hud.enabled = !self.ohne_hud;
+        if let Some(m) = self.sprachmodell {
+            cfg.brain.model = Some(m);
+        }
+        if self.ohne_sprachmodell {
+            cfg.brain.provider = jarvis_node::config::BrainProvider::Off;
+        }
+    }
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -62,8 +96,8 @@ async fn main() -> Result<()> {
         .init();
 
     match Cli::parse().cmd.unwrap_or(Cmd::Run) {
-        Cmd::Init { name } => init(name),
-        Cmd::Join { code, name } => join(&code, name),
+        Cmd::Init { name, opts } => init(name, opts),
+        Cmd::Join { code, name, opts } => join(&code, name, opts),
         Cmd::Run => run().await,
         Cmd::Autostart { mode } => autostart_cmd(mode),
         Cmd::Pair => pair(),
@@ -142,7 +176,7 @@ fn autostart_cmd(mode: AutostartMode) -> Result<()> {
     Ok(())
 }
 
-fn init(name: Option<String>) -> Result<()> {
+fn init(name: Option<String>, opts: SetupOpts) -> Result<()> {
     let path = Config::path();
     if path.exists() {
         bail!(
@@ -152,6 +186,7 @@ fn init(name: Option<String>) -> Result<()> {
     }
     let name = name.unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string());
     let mut cfg = Config::new(name)?;
+    opts.apply(&mut cfg);
     cfg.save()?;
     println!("Eingerichtet: „{}“ ({})", cfg.device.name, path.display());
     println!("\nWeitere Geräte koppeln: Dienst starten (`jarvisd` oder `jarvisd autostart an`),");
@@ -159,7 +194,7 @@ fn init(name: Option<String>) -> Result<()> {
     Ok(())
 }
 
-fn join(code: &str, name: Option<String>) -> Result<()> {
+fn join(code: &str, name: Option<String>, opts: SetupOpts) -> Result<()> {
     let path = Config::path();
     if path.exists() {
         bail!(
@@ -170,6 +205,7 @@ fn join(code: &str, name: Option<String>) -> Result<()> {
     let p = jarvis_node::pairing::parse(code)?;
     let name = name.unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string());
     let mut cfg = Config::new(name)?;
+    opts.apply(&mut cfg);
     cfg.mesh.static_peers = p.addrs.clone();
     cfg.save()?;
     let trust = TrustStore {

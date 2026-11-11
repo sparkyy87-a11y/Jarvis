@@ -34,7 +34,30 @@ Regeln einen Satz nicht verstehen.
 | Apps für Android, iPhone und iPad (Mikrofon-Taste, Dateien, Kopplung per QR-Code) | ✅ |
 | Zugriff von unterwegs (Relay) | Phase 5 |
 
-## Schnellstart
+## Installation
+
+**Windows (PC, Laptop):** `Jarvis-Setup-….exe` aus dem neuesten Release bzw.
+*Actions › Release › Artifacts* starten. Der Installer
+- braucht keine Adminrechte und keine weiteren Programme,
+- fragt nach dem Gerätenamen und ob es das erste Gerät ist oder gekoppelt wird,
+- installiert auf Wunsch das kostenlose Sprachmodell (Ollama) – nur auf *einem*
+  Gerät nötig, die anderen fragen dieses –,
+- lädt die Spracherkennung vorab, gibt auf Wunsch die Firewall **nur fürs
+  Heimnetz** frei und startet Jarvis bei jeder Anmeldung.
+
+Reihenfolge: zuerst den PC („erstes Gerät"), danach Startmenü › Jarvis › *Gerät
+koppeln* – das zeigt einen QR-Code mit Einmal-Code für das nächste Gerät:
+Laptop (Code in den Installer einfügen), Handy und iPads (QR-Code mit der Kamera
+scannen). Für jedes weitere Gerät einen neuen Code holen.
+
+Windows zeigt beim ersten Start des Installers eventuell „Unbekannter
+Herausgeber" (SmartScreen), weil er nicht mit einem kostenpflichtigen
+Zertifikat signiert ist: *Weitere Informationen › Trotzdem ausführen*.
+
+**Android:** `Jarvis-Android-….apk` aus dem Release öffnen. **iPhone/iPad:** siehe
+[Handy und Tablet](#handy-und-tablet).
+
+## Selbst bauen
 
 ```bash
 git clone https://github.com/sparkyy87-a11y/Jarvis.git && cd Jarvis

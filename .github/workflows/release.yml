@@ -1,0 +1,65 @@
+# Baut alles, was man zum Installieren braucht:
+#   Windows-Installer (Jarvis-Setup-x.y.z.exe), Android-APK, iPhone/iPad-IPA (unsigniert).
+# Ein Tag „v…" (z. B. v0.2.0) veröffentlicht sie zusätzlich als GitHub-Release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Programme bauen (statisch – keine Laufzeit-Abhängigkeiten)
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        # --target trennt Build-Skripte (Host) von den Programmen (statisch)
+        run: cargo build --release --target x86_64-pc-windows-msvc -p jarvis-node -p jarvis-voice -p jarvis-hud
+      - name: Installer bauen (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $ver = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq 'jarvis-node').version
+          & $iscc "/DAppVersion=$ver" "/DBinDir=..\..\target\x86_64-pc-windows-msvc\release" installer\windows\jarvis.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-windows-installer
+          path: dist/*.exe
+
+  android:
+    uses: ./.github/workflows/android.yml
+
+  ios:
+    uses: ./.github/workflows/ios.yml
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: GitHub-Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cd out
+          mv jarvis-android-apk/app-release.apk "Jarvis-Android-${GITHUB_REF_NAME}.apk"
+          mv jarvis-ios-unsigned-ipa/Jarvis-unsigned.ipa "Jarvis-iOS-${GITHUB_REF_NAME}-unsigniert.ipa"
+          sha256sum *.apk *.ipa jarvis-windows-installer/*.exe > SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" --title "Jarvis ${GITHUB_REF_NAME}" --generate-notes \
+            jarvis-windows-installer/*.exe *.apk *.ipa SHA256SUMS.txt

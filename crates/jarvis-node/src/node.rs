@@ -770,10 +770,15 @@ impl Node {
                     command: None,
                     reply,
                 },
-                Err(e) => Interpreted {
-                    ok: false,
-                    command: None,
-                    reply: format!("{e:#}"),
+                // Eigenes Modell nicht erreichbar (z. B. kein Ollama auf dem Laptop):
+                // das Sprachmodell eines anderen Geräts fragen.
+                Err(e) => match self.interpret_remote(text).await {
+                    Ok(i) => i,
+                    Err(_) => Interpreted {
+                        ok: false,
+                        command: None,
+                        reply: format!("{e}"),
+                    },
                 },
             }
         } else {
