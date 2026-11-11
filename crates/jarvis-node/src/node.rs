@@ -22,8 +22,9 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::config::Config;
+use crate::files;
+use crate::host::{DesktopHost, Host};
 use crate::transport::SecureConn;
-use crate::{exec, files};
 
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -80,6 +81,15 @@ pub struct Node {
     /// Feste Adresse -> Gerät, das dort zuletzt erreichbar war.
     static_links: Mutex<HashMap<String, Uuid>>,
     brain: Option<Brain>,
+    host: Arc<dyn Host>,
+    interpreting: Mutex<HashMap<Uuid, oneshot::Sender<Interpreted>>>,
+}
+
+/// Deutung eines freien Satzes, ggf. von einem anderen Gerät.
+struct Interpreted {
+    ok: bool,
+    command: Option<Command>,
+    reply: String,
 }
 
 enum Resolved {
@@ -89,7 +99,13 @@ enum Resolved {
 
 impl Node {
     pub fn new(cfg: Config) -> Result<Arc<Self>> {
-        let me = DeviceInfo {
+        let host = Arc::new(DesktopHost::new(cfg.apps.clone()));
+        Self::with_host(cfg, host)
+    }
+
+    /// Mit eigener Plattform-Umsetzung (Handy-Apps).
+    pub fn with_host(cfg: Config, host: Arc<dyn Host>) -> Result<Arc<Self>> {
+        let mut me = DeviceInfo {
             id: cfg.device.id,
             name: cfg.device.name.clone(),
             platform: cfg.platform(),
@@ -107,6 +123,9 @@ impl Node {
             }
             Err(e) => bail!("[brain]: {e}"),
         };
+        if brain.is_some() {
+            me.capabilities.push(Capability::Brain);
+        }
         Ok(Arc::new(Self {
             me,
             psk: cfg.pairing_key()?,
@@ -115,6 +134,8 @@ impl Node {
             pending: Mutex::default(),
             static_links: Mutex::default(),
             brain,
+            host,
+            interpreting: Mutex::default(),
         }))
     }
 
@@ -301,6 +322,44 @@ impl Node {
         match frame {
             Frame::Ping => Some(Frame::Pong),
             Frame::Pong | Frame::Hello { .. } => None,
+            Frame::Interpret { id, text, here } => {
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let answer = match self.interpret_with_brain(&text, &here).await {
+                        Ok(Interpretation::Command { command, reply }) => Frame::Interpreted {
+                            id,
+                            ok: true,
+                            command: Some(command),
+                            reply,
+                        },
+                        Ok(Interpretation::Answer(reply)) => Frame::Interpreted {
+                            id,
+                            ok: true,
+                            command: None,
+                            reply,
+                        },
+                        Err(e) => Frame::Interpreted {
+                            id,
+                            ok: false,
+                            command: None,
+                            reply: format!("{e:#}"),
+                        },
+                    };
+                    let _ = tx.send(answer).await;
+                });
+                None
+            }
+            Frame::Interpreted {
+                id,
+                ok,
+                command,
+                reply,
+            } => {
+                if let Some(waiter) = self.interpreting.lock().unwrap().remove(&id) {
+                    let _ = waiter.send(Interpreted { ok, command, reply });
+                }
+                None
+            }
             Frame::Execute { id, action } => {
                 let tx = tx.clone();
                 tokio::spawn(async move {
@@ -323,7 +382,7 @@ impl Node {
                 name,
                 size,
                 folder,
-            } => match Incoming::start(&name, size, folder.as_ref()).await {
+            } => match Incoming::start(&name, size, self.host.receive_dir(folder.as_ref())).await {
                 Ok(inc) => {
                     incoming.insert(id, inc);
                     None
@@ -344,6 +403,7 @@ impl Node {
                 match inc.finish(&sha256).await {
                     Ok(path) => {
                         info!("Datei empfangen: {}", path.display());
+                        self.host.file_received(&path);
                         Some(Frame::Outcome {
                             id,
                             ok: true,
@@ -420,25 +480,102 @@ impl Node {
         reply
     }
 
+    /// Deutet einen freien Satz: mit dem eigenen Sprachmodell oder – etwa auf
+    /// dem Handy – mit dem eines verbundenen Geräts (z. B. Ollama auf dem PC).
     async fn ask_brain(&self, text: &str) -> Reply {
-        let Some(brain) = &self.brain else {
-            return Reply::err("Das habe ich nicht verstanden. (Sprachmodell ist ausgeschaltet.)");
+        let interpreted = if self.brain.is_some() {
+            match self.interpret_with_brain(text, &self.me.name).await {
+                Ok(Interpretation::Command { command, reply }) => Interpreted {
+                    ok: true,
+                    command: Some(command),
+                    reply,
+                },
+                Ok(Interpretation::Answer(reply)) => Interpreted {
+                    ok: true,
+                    command: None,
+                    reply,
+                },
+                Err(e) => Interpreted {
+                    ok: false,
+                    command: None,
+                    reply: format!("{e:#}"),
+                },
+            }
+        } else {
+            match self.interpret_remote(text).await {
+                Ok(i) => i,
+                Err(e) => return Reply::err(format!("Das habe ich nicht verstanden. ({e})")),
+            }
         };
+        match interpreted {
+            Interpreted {
+                ok: false, reply, ..
+            } => Reply::err(format!("Das habe ich nicht verstanden: {reply}")),
+            Interpreted {
+                command: None,
+                reply,
+                ..
+            } => Reply::ok(reply),
+            Interpreted {
+                command: Some(command),
+                reply,
+                ..
+            } => match self.run(&command).await {
+                Ok(msg) if reply.is_empty() => Reply::ok(msg),
+                Ok(_) => Reply::ok(reply),
+                Err(e) => Reply::err(format!("{e:#}")),
+            },
+        }
+    }
+
+    async fn interpret_with_brain(&self, text: &str, here: &str) -> Result<Interpretation> {
+        let brain = self
+            .brain
+            .as_ref()
+            .context("kein Sprachmodell auf diesem Gerät")?;
         let devices: Vec<(String, String)> = self
             .devices()
             .into_iter()
             .map(|d| (d.name, format!("{:?}", d.platform)))
             .collect();
-        match brain.interpret(text, &self.me.name, &devices).await {
-            Ok(Interpretation::Answer(a)) => Reply::ok(a),
-            Ok(Interpretation::Command { command, reply }) => match self.run(&command).await {
-                Ok(_) => Reply::ok(reply),
-                Err(e) => Reply::err(format!("{e:#}")),
-            },
-            Err(e) => Reply::err(format!(
-                "Das habe ich nicht verstanden, und {} hilft gerade nicht weiter: {e}",
-                brain.backend().describe()
-            )),
+        brain
+            .interpret(text, here, &devices)
+            .await
+            .with_context(|| format!("{} hilft gerade nicht weiter", brain.backend().describe()))
+    }
+
+    async fn interpret_remote(&self, text: &str) -> Result<Interpreted> {
+        let peer = self
+            .peers
+            .lock()
+            .unwrap()
+            .values()
+            .find(|p| p.info.capabilities.contains(&Capability::Brain))
+            .cloned()
+            .context("kein verbundenes Gerät mit Sprachmodell")?;
+        let id = Uuid::new_v4();
+        let (tx, rx) = oneshot::channel();
+        self.interpreting.lock().unwrap().insert(id, tx);
+        let sent = peer
+            .tx
+            .send(Frame::Interpret {
+                id,
+                text: text.to_string(),
+                here: self.me.name.clone(),
+            })
+            .await;
+        let result = match sent {
+            Ok(()) => tokio::time::timeout(Duration::from_secs(90), rx).await,
+            Err(_) => {
+                self.interpreting.lock().unwrap().remove(&id);
+                bail!("{} ist nicht mehr verbunden", peer.info.name);
+            }
+        };
+        self.interpreting.lock().unwrap().remove(&id);
+        match result {
+            Ok(Ok(i)) => Ok(i),
+            Ok(Err(_)) => bail!("Verbindung zu {} unterbrochen", peer.info.name),
+            Err(_) => bail!("{} antwortet nicht", peer.info.name),
         }
     }
 
@@ -448,8 +585,8 @@ impl Node {
         match (&cmd.action, target) {
             (Action::SendFile { file, folder }, Resolved::Remote(peer)) => {
                 let path = tokio::task::spawn_blocking({
-                    let file = file.clone();
-                    move || files::locate(&file)
+                    let (file, host) = (file.clone(), self.host.clone());
+                    move || host.locate_file(&file)
                 })
                 .await??;
                 self.send_file(&peer, &path, folder.clone()).await?;
@@ -508,15 +645,16 @@ impl Node {
     async fn execute_local(&self, action: &Action) -> Result<String> {
         match action {
             Action::OpenApp { app } => {
-                let (app, apps) = (app.clone(), self.cfg.apps.clone());
-                tokio::task::spawn_blocking(move || exec::open_app(&app, &apps)).await?
+                let (app, host) = (app.clone(), self.host.clone());
+                tokio::task::spawn_blocking(move || host.open_app(&app)).await?
             }
             Action::CloseApp { app } => {
-                let app = app.clone();
-                tokio::task::spawn_blocking(move || exec::close_app(&app)).await?
+                let (app, host) = (app.clone(), self.host.clone());
+                tokio::task::spawn_blocking(move || host.close_app(&app)).await?
             }
             Action::Say { text } => {
-                exec::say(text).await?;
+                let (text, host) = (text.clone(), self.host.clone());
+                tokio::task::spawn_blocking(move || host.say(&text)).await??;
                 Ok("Gesagt.".into())
             }
             Action::ComputerUse { task } => {
@@ -640,9 +778,9 @@ struct Incoming {
 }
 
 impl Incoming {
-    async fn start(name: &str, size: u64, folder: Option<&Folder>) -> Result<Self> {
+    async fn start(name: &str, size: u64, dir: Result<PathBuf>) -> Result<Self> {
         let name = files::safe_file_name(name)?;
-        let dir = files::resolve_folder(folder)?;
+        let dir = dir?;
         tokio::fs::create_dir_all(&dir).await?;
         let part = dir.join(format!(".{name}.{}.jarvis-part", Uuid::new_v4().simple()));
         let file = tokio::fs::File::create(&part).await?;

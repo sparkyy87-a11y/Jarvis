@@ -30,10 +30,19 @@ pub fn locate(spoken: &str) -> Result<PathBuf> {
     .filter_map(|f| resolve_folder(Some(f)).ok())
     .collect();
     roots.dedup();
+    locate_in(&roots, spoken)
+}
+
+/// Wie [`locate`], aber in selbst gewählten Ordnern (z. B. auf dem Handy).
+pub fn locate_in(roots: &[PathBuf], spoken: &str) -> Result<PathBuf> {
+    let direct = expand_home(spoken);
+    if direct.is_file() {
+        return Ok(direct);
+    }
 
     let wanted_name = spoken.trim().to_lowercase();
     let wanted_stem = squash(spoken);
-    let all = walk(&roots, 4, &|_| true);
+    let all = walk(roots, 4, &|_| true);
     let stem_of = |p: &PathBuf| {
         p.file_stem()
             .map(|n| squash(&n.to_string_lossy()))

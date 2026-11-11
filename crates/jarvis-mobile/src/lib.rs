@@ -1,0 +1,341 @@
+//! Jarvis-Kern für die Handy-Apps (iPhone, iPad, Android).
+//!
+//! Die Apps rufen diese Funktionen über automatisch erzeugte Kotlin- bzw.
+//! Swift-Anbindungen (UniFFI) auf. Netz, Verschlüsselung, Befehlserkennung
+//! und Dateiübertragung sind exakt dieselben wie auf dem PC; nur das, was
+//! nur das Handy kann (Apps öffnen, vorlesen), erledigt die App über
+//! [`PlatformBridge`].
+//!
+//! Alle Methoden blockieren und sind für einen Hintergrund-Thread gedacht.
+
+use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
+
+use anyhow::bail;
+use jarvis_node::config::{BrainProvider, Config};
+use jarvis_node::host::Host;
+use jarvis_node::node::Node;
+use jarvis_node::{discovery, files, pairing};
+use jarvis_protocol::{Action, Command, Folder, Platform, Target};
+
+uniffi::setup_scaffolding!();
+
+#[derive(Debug, thiserror::Error, uniffi::Error)]
+pub enum JarvisError {
+    #[error("{message}")]
+    Failed { message: String },
+}
+
+impl From<anyhow::Error> for JarvisError {
+    fn from(e: anyhow::Error) -> Self {
+        JarvisError::Failed {
+            message: format!("{e:#}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Reply {
+    pub ok: bool,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Device {
+    pub name: String,
+    pub platform: String,
+    pub this_device: bool,
+    pub address: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PairingInfo {
+    /// Gerät, das den Code gezeigt hat (meist der PC).
+    pub name: String,
+    pub addresses: Vec<String>,
+}
+
+/// Was die App für Jarvis erledigt.
+#[uniffi::export(with_foreign)]
+pub trait PlatformBridge: Send + Sync {
+    /// App öffnen (Android: Launcher-Eintrag, iOS: URL-Schema).
+    fn open_app(&self, app: String) -> Reply;
+    /// Text vorlesen.
+    fn speak(&self, text: String);
+    /// Eine Datei ist angekommen (z. B. Benachrichtigung zeigen).
+    fn file_received(&self, path: String);
+}
+
+/// Prüft einen Kopplungscode (`jarvis://pair?…`) ohne ihn zu speichern.
+#[uniffi::export]
+pub fn parse_pairing_code(code: String) -> Result<PairingInfo, JarvisError> {
+    let p = pairing::parse(&code)?;
+    Ok(PairingInfo {
+        name: p.name,
+        addresses: p.addrs,
+    })
+}
+
+/// Ist dieses Handy schon mit einem Jarvis gekoppelt?
+#[uniffi::export]
+pub fn is_paired(data_dir: String) -> bool {
+    config_path(&data_dir).is_file()
+}
+
+/// Koppelt dieses Handy mit dem Kopplungscode vom PC (`jarvisd pair`).
+/// `platform`: "android", "ios" oder "ipados".
+#[uniffi::export]
+pub fn pair(
+    data_dir: String,
+    device_name: String,
+    platform: String,
+    code: String,
+) -> Result<PairingInfo, JarvisError> {
+    let p = pairing::parse(&code)?;
+    let platform = parse_platform(&platform)?;
+    // Bestehende Geräte-ID behalten, falls neu gekoppelt wird.
+    let mut cfg = Config::new(device_name, Some(p.key.clone()))?;
+    if let Ok(old) = Config::load_from(&config_path(&data_dir)) {
+        cfg.device.id = old.device.id;
+    }
+    cfg.device.platform = Some(platform);
+    cfg.mesh.static_peers = p.addrs.clone();
+    // iOS erlaubt Multicast nur mit Sondergenehmigung; dort genügt die feste Adresse.
+    cfg.mesh.mdns = platform == Platform::Android;
+    // Freie Sätze deutet das Sprachmodell auf dem PC.
+    cfg.brain.provider = BrainProvider::Off;
+    cfg.voice.enabled = false;
+    cfg.save_to(&config_path(&data_dir))?;
+    Ok(PairingInfo {
+        name: p.name,
+        addresses: p.addrs,
+    })
+}
+
+/// Kopplung löschen.
+#[uniffi::export]
+pub fn unpair(data_dir: String) {
+    let _ = std::fs::remove_file(config_path(&data_dir));
+}
+
+#[derive(uniffi::Object)]
+pub struct Jarvis {
+    rt: tokio::runtime::Runtime,
+    node: Arc<Node>,
+    files_dir: PathBuf,
+}
+
+#[uniffi::export]
+impl Jarvis {
+    /// Startet Jarvis auf dem Handy. `data_dir` ist ein privater App-Ordner;
+    /// empfangene Dateien landen darunter in `Jarvis/`.
+    #[uniffi::constructor]
+    pub fn start(
+        data_dir: String,
+        bridge: Arc<dyn PlatformBridge>,
+    ) -> Result<Arc<Self>, JarvisError> {
+        let cfg = Config::load_from(&config_path(&data_dir)).map_err(|_| JarvisError::Failed {
+            message:
+                "Noch nicht gekoppelt – am PC `jarvisd pair` ausführen und den QR-Code scannen."
+                    .into(),
+        })?;
+        let files_dir = PathBuf::from(&data_dir).join("Jarvis");
+        std::fs::create_dir_all(&files_dir).map_err(anyhow::Error::from)?;
+        let host = Arc::new(MobileHost {
+            bridge,
+            files_dir: files_dir.clone(),
+        });
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .thread_name("jarvis")
+            .build()
+            .map_err(anyhow::Error::from)?;
+        let node = {
+            let _guard = rt.enter();
+            Node::with_host(cfg.clone(), host)?
+        };
+        rt.spawn(node.clone().listen());
+        rt.spawn(node.clone().maintain_static_peers());
+        if cfg.mesh.mdns {
+            rt.spawn(discovery::run(node.clone(), cfg.mesh.port));
+        }
+        Ok(Arc::new(Self {
+            rt,
+            node,
+            files_dir,
+        }))
+    }
+
+    /// Text (getippt oder gesprochen) an Jarvis. Blockiert bis zur Antwort.
+    pub fn ask(&self, text: String) -> Reply {
+        let r = self.rt.block_on(self.node.handle_text(&text));
+        Reply {
+            ok: r.ok,
+            text: r.text,
+        }
+    }
+
+    /// Eine Datei (z. B. aus dem Teilen-Menü) an ein Gerät schicken.
+    pub fn send_file(&self, path: String, device: String, folder: Option<String>) -> Reply {
+        let cmd = Command {
+            action: Action::SendFile {
+                file: path,
+                folder: folder.as_deref().map(Folder::from_spoken),
+            },
+            target: Target::Named(device.to_lowercase()),
+        };
+        match self.rt.block_on(self.node.run(&cmd)) {
+            Ok(text) => Reply { ok: true, text },
+            Err(e) => Reply {
+                ok: false,
+                text: format!("{e:#}"),
+            },
+        }
+    }
+
+    pub fn devices(&self) -> Vec<Device> {
+        self.node
+            .devices()
+            .into_iter()
+            .map(|d| Device {
+                name: d.name,
+                platform: format!("{:?}", d.platform),
+                this_device: d.this_device,
+                address: d.address,
+            })
+            .collect()
+    }
+
+    /// Ordner mit empfangenen Dateien.
+    pub fn files_dir(&self) -> String {
+        self.files_dir.to_string_lossy().into_owned()
+    }
+
+    pub fn device_name(&self) -> String {
+        self.node.me.name.clone()
+    }
+}
+
+fn config_path(data_dir: &str) -> PathBuf {
+    PathBuf::from(data_dir).join("jarvis.toml")
+}
+
+fn parse_platform(p: &str) -> anyhow::Result<Platform> {
+    Ok(match p.to_lowercase().as_str() {
+        "android" => Platform::Android,
+        "ios" | "iphone" => Platform::Ios,
+        "ipados" | "ipad" => Platform::IpadOs,
+        other => bail!("Unbekannte Plattform „{other}“"),
+    })
+}
+
+struct MobileHost {
+    bridge: Arc<dyn PlatformBridge>,
+    files_dir: PathBuf,
+}
+
+impl Host for MobileHost {
+    fn open_app(&self, app: &str) -> anyhow::Result<String> {
+        let r = self.bridge.open_app(app.to_string());
+        if r.ok {
+            Ok(r.text)
+        } else {
+            bail!(r.text)
+        }
+    }
+
+    fn close_app(&self, app: &str) -> anyhow::Result<String> {
+        bail!("Apps schließen kann ich auf dem Handy nicht ({app}).")
+    }
+
+    fn say(&self, text: &str) -> anyhow::Result<()> {
+        self.bridge.speak(text.to_string());
+        Ok(())
+    }
+
+    fn receive_dir(&self, folder: Option<&Folder>) -> anyhow::Result<PathBuf> {
+        let sub = match folder {
+            None | Some(Folder::Downloads) => "Downloads".to_string(),
+            Some(Folder::Documents) => "Dokumente".into(),
+            Some(Folder::Desktop) => "Desktop".into(),
+            Some(Folder::Pictures) => "Bilder".into(),
+            Some(Folder::Music) => "Musik".into(),
+            Some(Folder::Videos) => "Videos".into(),
+            Some(Folder::Custom(rel)) => {
+                let rel = Path::new(rel);
+                if !rel.components().all(|c| matches!(c, Component::Normal(_))) {
+                    bail!("Ungültiger Zielordner „{}“", rel.display());
+                }
+                rel.to_string_lossy().into_owned()
+            }
+        };
+        Ok(self.files_dir.join(sub))
+    }
+
+    fn locate_file(&self, spoken: &str) -> anyhow::Result<PathBuf> {
+        files::locate_in(std::slice::from_ref(&self.files_dir), spoken)
+    }
+
+    fn file_received(&self, path: &Path) {
+        self.bridge
+            .file_received(path.to_string_lossy().into_owned());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeBridge {
+        spoken: Mutex<Vec<String>>,
+        opened: Mutex<Vec<String>>,
+    }
+
+    impl PlatformBridge for FakeBridge {
+        fn open_app(&self, app: String) -> Reply {
+            self.opened.lock().unwrap().push(app.clone());
+            Reply {
+                ok: true,
+                text: format!("{app} geöffnet"),
+            }
+        }
+        fn speak(&self, text: String) {
+            self.spoken.lock().unwrap().push(text);
+        }
+        fn file_received(&self, _path: String) {}
+    }
+
+    fn code() -> String {
+        format!(
+            "jarvis://pair?v=1&key={}&name=Gaming-PC&addr=127.0.0.1:1",
+            "ab".repeat(32)
+        )
+    }
+
+    #[test]
+    fn pair_and_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_string_lossy().to_string();
+        assert!(!is_paired(d.clone()));
+        assert!(Jarvis::start(d.clone(), Arc::new(FakeBridge::default())).is_err());
+
+        let info = pair(d.clone(), "Handy".into(), "android".into(), code()).unwrap();
+        assert_eq!(info.name, "Gaming-PC");
+        assert!(is_paired(d.clone()));
+
+        let bridge = Arc::new(FakeBridge::default());
+        let j = Jarvis::start(d.clone(), bridge.clone()).unwrap();
+        assert_eq!(j.device_name(), "Handy");
+        let r = j.ask("öffne Spotify".into());
+        assert!(r.ok, "{}", r.text);
+        assert_eq!(*bridge.opened.lock().unwrap(), vec!["Spotify".to_string()]);
+        let r = j.ask("schließe Spotify".into());
+        assert!(!r.ok);
+        // Ohne verbundenen PC kein Sprachmodell für freie Sätze:
+        let r = j.ask("wie wird das Wetter".into());
+        assert!(!r.ok && r.text.contains("Sprachmodell"), "{}", r.text);
+    }
+}

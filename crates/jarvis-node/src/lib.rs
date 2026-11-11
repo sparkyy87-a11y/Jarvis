@@ -13,5 +13,7 @@ pub mod control;
 pub mod discovery;
 pub mod exec;
 pub mod files;
+pub mod host;
 pub mod node;
+pub mod pairing;
 pub mod transport;

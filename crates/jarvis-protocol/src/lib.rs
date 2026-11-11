@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Version des Drahtprotokolls. Wird im `Hello` ausgetauscht.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Größe eines Datei-Chunks. Muss zusammen mit dem Frame-Overhead unter die
 /// Noise-Grenze von 65 535 Byte pro Nachricht passen.
@@ -99,6 +99,8 @@ pub enum Capability {
     ReceiveFiles,
     Speak,
     ComputerUse,
+    /// Hat ein Sprachmodell und deutet freie Sätze für andere Geräte.
+    Brain,
 }
 
 /// Bekannte Zielordner. `Custom` ist ein Pfad relativ zum Home-Verzeichnis.
@@ -207,6 +209,20 @@ pub enum Frame {
     },
     Ping,
     Pong,
+    /// Bitte um Deutung eines freien Satzes (an ein Gerät mit `Brain`).
+    /// `here` ist der Name des fragenden Geräts.
+    Interpret {
+        id: Uuid,
+        text: String,
+        here: String,
+    },
+    /// Antwort darauf: Befehl zum Ausführen (beim Fragenden) und/oder Antwort.
+    Interpreted {
+        id: Uuid,
+        ok: bool,
+        command: Option<Command>,
+        reply: String,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

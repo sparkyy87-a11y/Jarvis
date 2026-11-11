@@ -164,7 +164,11 @@ impl Config {
     }
 
     pub fn load() -> Result<Self> {
-        let path = Self::path();
+        Self::load_from(&Self::path())
+    }
+
+    pub fn load_from(path: &std::path::Path) -> Result<Self> {
+        let path = path.to_path_buf();
         let text = std::fs::read_to_string(&path).with_context(|| {
             format!("{} fehlt – zuerst `jarvisd init` ausführen", path.display())
         })?;
@@ -175,11 +179,14 @@ impl Config {
     }
 
     pub fn save(&self) -> Result<()> {
-        let path = Self::path();
+        self.save_to(&Self::path())
+    }
+
+    pub fn save_to(&self, path: &std::path::Path) -> Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        std::fs::write(path, toml::to_string_pretty(self)?)?;
         Ok(())
     }
 

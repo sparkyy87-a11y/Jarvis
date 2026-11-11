@@ -32,6 +32,8 @@ enum Cmd {
     },
     /// Pairing-Schlüssel anzeigen (für `jarvisd join` auf anderen Geräten).
     Key,
+    /// QR-Code zum Koppeln von iPhone/Android anzeigen.
+    Pair,
     /// Jarvis beim Anmelden automatisch starten: an, aus oder status.
     Autostart {
         #[arg(value_enum, default_value = "status")]
@@ -64,7 +66,28 @@ async fn main() -> Result<()> {
         }
         Cmd::Run => run().await,
         Cmd::Autostart { mode } => autostart_cmd(mode),
+        Cmd::Pair => pair(),
     }
+}
+
+fn pair() -> Result<()> {
+    let cfg = Config::load()?;
+    let link = jarvis_node::pairing::link_for(&cfg);
+    let qr = qrcode::QrCode::new(link.as_bytes())?;
+    let art = qr
+        .render::<qrcode::render::unicode::Dense1x2>()
+        .dark_color(qrcode::render::unicode::Dense1x2::Light)
+        .light_color(qrcode::render::unicode::Dense1x2::Dark)
+        .quiet_zone(true)
+        .build();
+    println!("{art}");
+    println!(
+        "Mit der Handykamera scannen – die Jarvis-App öffnet sich und koppelt sich mit „{}“.",
+        cfg.device.name
+    );
+    println!("Oder diesen Code in der App einfügen:\n{link}\n");
+    println!("Achtung: Der Code enthält den Pairing-Schlüssel – nicht weitergeben.");
+    Ok(())
 }
 
 fn autostart_cmd(mode: AutostartMode) -> Result<()> {
