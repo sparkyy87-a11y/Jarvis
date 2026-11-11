@@ -1028,6 +1028,10 @@ impl Node {
                 tokio::task::spawn_blocking(move || host.play_music(&query, service.as_deref()))
                     .await?
             }
+            Action::PairDevice => {
+                let host = self.host.clone();
+                tokio::task::spawn_blocking(move || host.show_pairing()).await?
+            }
             Action::Media { command } => {
                 let (command, host) = (*command, self.host.clone());
                 tokio::task::spawn_blocking(move || host.media(command)).await?

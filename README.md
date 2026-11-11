@@ -45,8 +45,9 @@ Regeln einen Satz nicht verstehen.
 - lädt die Spracherkennung vorab, gibt auf Wunsch die Firewall **nur fürs
   Heimnetz** frei und startet Jarvis bei jeder Anmeldung.
 
-Reihenfolge: zuerst den PC („erstes Gerät"), danach Startmenü › Jarvis › *Gerät
-koppeln* – das zeigt einen QR-Code mit Einmal-Code für das nächste Gerät:
+Reihenfolge: zuerst den PC („erstes Gerät"), danach **„Jarvis, verbinde dich mit
+einem neuen Gerät"** sagen (oder Startmenü › Jarvis-Einstellungen › Geräte) – das
+zeigt einen QR-Code mit Einmal-Code für das nächste Gerät:
 Laptop (Code in den Installer einfügen), Handy und iPads (QR-Code mit der Kamera
 scannen). Für jedes weitere Gerät einen neuen Code holen.
 

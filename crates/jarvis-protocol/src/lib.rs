@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Version des Drahtprotokolls. Wird im `Hello` ausgetauscht.
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Größe eines Datei-Chunks. Muss zusammen mit dem Frame-Overhead unter die
 /// Noise-Grenze von 65 535 Byte pro Nachricht passen.
@@ -175,6 +175,8 @@ pub enum Action {
     Media {
         command: MediaCommand,
     },
+    /// QR-Code zum Koppeln eines neuen Geräts auf dem Bildschirm zeigen.
+    PairDevice,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

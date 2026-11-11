@@ -115,6 +115,13 @@ impl App {
             save_task: Task::none(),
         };
         app.check_ollama(ctx);
+        // `--koppeln` (z. B. von „Jarvis, verbinde dich mit einem neuen Gerät“):
+        // direkt die Geräte-Seite mit frischem QR-Code, im Vordergrund.
+        if std::env::args().any(|a| a == "--koppeln") {
+            app.page = Page::Devices;
+            app.request_pairing(ctx);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         app
     }
 
@@ -122,6 +129,17 @@ impl App {
         self.cfg
             .as_ref()
             .map(|c| (c.mesh.control_port, c.control_token_path()))
+    }
+
+    fn request_pairing(&mut self, ctx: &egui::Context) {
+        if let Some((port, token)) = self.control() {
+            self.pair_task = Task::spawn(ctx, move || {
+                let r = control::request_blocking(port, &token, &Request::Pair { addrs: None })
+                    .map_err(|e| format!("{e:#}"))?;
+                r.link
+                    .ok_or_else(|| r.text.unwrap_or_else(|| "Kein Code erhalten".into()))
+            });
+        }
     }
 
     fn check_ollama(&mut self, ctx: &egui::Context) {
@@ -502,15 +520,7 @@ impl App {
                 )
                 .clicked()
             {
-                if let Some((port, token)) = self.control() {
-                    self.pair_task = Task::spawn(ctx, move || {
-                        let r =
-                            control::request_blocking(port, &token, &Request::Pair { addrs: None })
-                                .map_err(|e| format!("{e:#}"))?;
-                        r.link
-                            .ok_or_else(|| r.text.unwrap_or_else(|| "Kein Code erhalten".into()))
-                    });
-                }
+                self.request_pairing(ctx);
             }
         });
         section(ui, "Erweitert", |ui| {

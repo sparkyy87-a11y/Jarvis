@@ -48,5 +48,6 @@ pub fn describe(action: &Action) -> String {
         Action::WebSearch { query } => format!("suche nach {query}"),
         Action::PlayMusic { query, .. } => format!("spiele {query}"),
         Action::Media { command } => format!("{command:?}").to_lowercase(),
+        Action::PairDevice => "neues Gerät koppeln".into(),
     }
 }

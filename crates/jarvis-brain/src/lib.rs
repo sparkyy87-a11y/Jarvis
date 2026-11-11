@@ -209,6 +209,7 @@ fn system_prompt(here: &str, devices: &[(String, String)]) -> String {
          - web_search: Suchbegriff in text (öffnet Google im Browser des Zielgeräts).\n\
          - play_music: Titel/Künstler/Album in text, Dienst (apple music, spotify, youtube music) in app oder leer.\n\
          - media: Wiedergabe steuern; text ist play, pause, next oder previous.\n\
+         - pair_device: ein neues Gerät verbinden/koppeln (zeigt einen QR-Code).\n\
          - computer_use nur für Aufgaben, die echte Bedienung des Bildschirms brauchen; die Aufgabe kommt in text.\n\
          - Ist es eine Frage oder Unterhaltung, nimm action=answer und schreibe die Antwort in reply.\n\
          - Felder, die nicht passen, bleiben leer."
@@ -230,7 +231,7 @@ fn schema(nullable: bool) -> serde_json::Value {
         "additionalProperties": false,
         "required": ["action", "target_device", "app", "file", "folder", "text", "reply"],
         "properties": {
-            "action": {"type": "string", "enum": ["open_app", "close_app", "send_file", "say", "web_search", "play_music", "media", "computer_use", "answer"]},
+            "action": {"type": "string", "enum": ["open_app", "close_app", "send_file", "say", "web_search", "play_music", "media", "pair_device", "computer_use", "answer"]},
             "target_device": field("Gerätename aus der Liste, sonst leer"),
             "app": field("App-Name für open_app/close_app"),
             "file": field("Dateiname für send_file"),
@@ -270,6 +271,7 @@ impl RawCommand {
             }),
             "say" => need(self.text).map(|text| Action::Say { text }),
             "computer_use" => need(self.text).map(|task| Action::ComputerUse { task }),
+            "pair_device" => Some(Action::PairDevice),
             "web_search" => need(self.text).map(|query| Action::WebSearch { query }),
             "play_music" => need(self.text).map(|query| Action::PlayMusic {
                 query,

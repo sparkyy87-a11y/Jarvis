@@ -28,6 +28,13 @@ pub fn parse(text: &str, device_names: &[String]) -> Option<Command> {
 
     let text = strip_fillers(&text);
 
+    if re(&PAIR_DEVICE).is_match(&text) {
+        return Some(Command {
+            action: Action::PairDevice,
+            target,
+        });
+    }
+
     for (pattern, command) in [
         (&MEDIA_PAUSE, MediaCommand::Pause),
         (&MEDIA_PLAY, MediaCommand::Play),
@@ -138,6 +145,10 @@ static INTO_FOLDER: Lazy = (
 static HYPHEN_NOUN: Lazy = (
     OnceLock::new(),
     r"(?i)\b(datei|ordner|verzeichnis|file|folder)-",
+);
+static PAIR_DEVICE: Lazy = (
+    OnceLock::new(),
+    r"(?i)^(?:(?:verbinde|verbind|koppel|koppele|kopple)\s+(?:dich\s+)?(?:mit\s+)?(?:einem|ein|einen)\s+(?:neue[sn]?|weitere[sn]?|andere[sn]?)\s+(?:gerät|handy|tablet|ipad|iphone|laptop|pc|computer)|(?:neues|weiteres)\s+gerät\s+(?:verbinden|koppeln|hinzufügen|einrichten)|(?:füge?|füg)\s+(?:ein\s+)?(?:neues|weiteres)\s+gerät\s+hinzu|zeig(?:e)?\s+(?:mir\s+)?(?:den\s+)?(?:qr|kopplungs)[-\s]?code|(?:pair|connect|add)\s+(?:a\s+)?new\s+device)$",
 );
 static MEDIA_PAUSE: Lazy = (
     OnceLock::new(),
@@ -538,5 +549,29 @@ mod tests {
             p("das vorherige Lied"),
             media(MediaCommand::Previous, Target::Here)
         );
+    }
+
+    #[test]
+    fn pair_device() {
+        let pair = |t: Target| {
+            Some(Command {
+                action: Action::PairDevice,
+                target: t,
+            })
+        };
+        assert_eq!(
+            p("Jarvis, verbinde dich mit einem neuen Gerät"),
+            pair(Target::Here)
+        );
+        assert_eq!(p("verbinde ein neues Handy"), pair(Target::Here));
+        assert_eq!(p("koppel ein neues Gerät"), pair(Target::Here));
+        assert_eq!(p("neues Gerät hinzufügen"), pair(Target::Here));
+        assert_eq!(p("füge ein neues Gerät hinzu"), pair(Target::Here));
+        assert_eq!(p("zeig mir den QR-Code"), pair(Target::Here));
+        assert_eq!(
+            p("verbinde dich am Laptop mit einem neuen Gerät"),
+            pair(Target::Named("laptop".into()))
+        );
+        assert_eq!(p("pair a new device"), pair(Target::Here));
     }
 }

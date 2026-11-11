@@ -28,6 +28,10 @@ pub trait Host: Send + Sync + 'static {
     /// `service`: "apple-music", "spotify", "youtube-music" oder Standard.
     fn play_music(&self, query: &str, service: Option<&str>) -> Result<String>;
     fn media(&self, command: MediaCommand) -> Result<String>;
+    /// QR-Code zum Koppeln eines neuen Geräts anzeigen.
+    fn show_pairing(&self) -> Result<String> {
+        anyhow::bail!("Neue Geräte koppelst du am PC oder Laptop: „Jarvis, verbinde dich mit einem neuen Gerät“.")
+    }
 }
 
 pub struct DesktopHost {
@@ -69,5 +73,20 @@ impl Host for DesktopHost {
     }
     fn media(&self, command: MediaCommand) -> Result<String> {
         exec::media(command, &self.music_service)
+    }
+    fn show_pairing(&self) -> Result<String> {
+        let exe = crate::autostart::sibling_exe("jarvis-einstellungen")?;
+        anyhow::ensure!(
+            exe.is_file(),
+            "Jarvis-Einstellungen sind nicht installiert ({}).",
+            exe.display()
+        );
+        std::process::Command::new(exe)
+            .arg("--koppeln")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        Ok("Hier ist der QR-Code – scanne ihn mit dem neuen Gerät. Er gilt zehn Minuten.".into())
     }
 }
