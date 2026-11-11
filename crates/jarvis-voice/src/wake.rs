@@ -112,6 +112,11 @@ impl Conversation {
         }
     }
 
+    /// Wartet Jarvis nach „Jarvis." gerade auf den Befehl?
+    pub fn is_armed(&self, now: Instant) -> bool {
+        self.armed_until.is_some_and(|t| now <= t)
+    }
+
     pub fn on_text(&mut self, text: &str, now: Instant) -> Decision {
         if is_hallucination(text) {
             return Decision::Ignore;

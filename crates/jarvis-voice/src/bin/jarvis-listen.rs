@@ -17,6 +17,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SizedSample};
 use jarvis_node::config::{Config, VoiceSection, DEFAULT_CONTROL_PORT};
 use jarvis_node::control::{Request, Response};
+use jarvis_node::events::HudEvent;
 use jarvis_node::exec;
 use jarvis_voice::audio::{downmix, Resampler};
 use jarvis_voice::segment::{EnergyDetector, Segmenter, SegmenterConfig, SpeechDetector};
@@ -57,6 +58,52 @@ struct App {
     speak: bool,
     stt: Transcriber,
     conversation: Conversation,
+    events: EventSink,
+}
+
+/// Schickt HUD-Ereignisse an jarvisd (ohne auf Antwort zu warten).
+struct EventSink {
+    port: u16,
+    stream: Option<TcpStream>,
+    last_level: Instant,
+}
+
+impl EventSink {
+    fn new(port: u16) -> Self {
+        Self {
+            port,
+            stream: None,
+            last_level: Instant::now(),
+        }
+    }
+
+    fn emit(&mut self, event: HudEvent) {
+        let mut line = match serde_json::to_string(&Request::Event { event }) {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        line.push('\n');
+        if self.stream.is_none() {
+            self.stream = TcpStream::connect(("127.0.0.1", self.port)).ok();
+        }
+        if let Some(s) = &mut self.stream {
+            if s.write_all(line.as_bytes()).is_err() {
+                self.stream = None;
+            }
+        }
+    }
+
+    /// Mikrofonpegel, höchstens 20-mal pro Sekunde.
+    fn level(&mut self, samples: &[f32]) {
+        if samples.is_empty() || self.last_level.elapsed() < Duration::from_millis(50) {
+            return;
+        }
+        self.last_level = Instant::now();
+        let rms = (samples.iter().map(|v| v * v).sum::<f32>() / samples.len() as f32).sqrt();
+        self.emit(HudEvent::Level {
+            value: (rms * 8.0).clamp(0.0, 1.0),
+        });
+    }
 }
 
 fn main() -> Result<()> {
@@ -117,6 +164,7 @@ fn main() -> Result<()> {
         voice,
         control_port,
         dry: cli.trocken,
+        events: EventSink::new(control_port),
         stt,
     };
 
@@ -203,7 +251,11 @@ impl App {
 
         let mut resampler = Resampler::new(rate, SAMPLE_RATE);
         while let Ok(chunk) = rx.recv() {
-            for seg in segmenter.push(&resampler.process(&chunk)) {
+            let samples = resampler.process(&chunk);
+            if self.conversation.is_armed(Instant::now()) {
+                self.events.level(&samples);
+            }
+            for seg in segmenter.push(&samples) {
                 if self.on_segment(&seg) {
                     // Jarvis hat gesprochen: das eigene Echo nicht als Befehl verstehen.
                     while rx.try_recv().is_ok() {}
@@ -235,9 +287,13 @@ impl App {
                 debug!("kein Weckwort – ignoriert");
                 false
             }
-            Decision::Acknowledge => self.say("Ja?"),
+            Decision::Acknowledge => {
+                self.events.emit(HudEvent::Wake);
+                self.say("Ja?")
+            }
             Decision::Command(cmd) => {
                 println!("» {cmd}");
+                self.events.emit(HudEvent::Wake);
                 if self.dry {
                     return false;
                 }
@@ -251,13 +307,15 @@ impl App {
         }
     }
 
-    fn say(&self, text: &str) -> bool {
+    fn say(&mut self, text: &str) -> bool {
         if !self.speak || text.is_empty() {
             return false;
         }
+        self.events.emit(HudEvent::Speaking { active: true });
         if let Err(e) = exec::say_blocking(text) {
             warn!("{e:#}");
         }
+        self.events.emit(HudEvent::Speaking { active: false });
         true
     }
 }
@@ -288,6 +346,7 @@ fn ask_jarvisd(port: u16, text: &str) -> Result<Response> {
     stream.set_read_timeout(Some(Duration::from_secs(90)))?;
     let mut line = serde_json::to_string(&Request::Text {
         text: text.to_string(),
+        source: Some("Sprache".into()),
     })?;
     line.push('\n');
     stream.write_all(line.as_bytes())?;

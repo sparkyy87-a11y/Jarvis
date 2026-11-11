@@ -28,6 +28,7 @@ Regeln einen Satz nicht verstehen.
 | Sprachausgabe über die Systemstimme | ✅ |
 | Spracheingabe: „Jarvis, …" + Whisper lokal, optional auf der Grafikkarte | ✅ |
 | Startet automatisch mit Windows/macOS/Linux, ohne Fenster | ✅ |
+| HUD: leuchtender Ring, der sich beim Sprechen mit Jarvis einblendet | ✅ |
 | Computer Use (Claude bedient den Bildschirm) | Phase 3 |
 | Apps für Android, iPhone und iPad (Mikrofon-Taste, Dateien, Kopplung per QR-Code) | ✅ |
 | Zugriff von unterwegs (Relay) | Phase 5 |
@@ -76,6 +77,31 @@ Schlüssel gesetzt, nimmt Jarvis automatisch Claude.
 
 **Windows:** Beim ersten Start fragt die Firewall nach Port 7879. Für das Heimnetz
 (privates Netzwerk) erlauben.
+
+## HUD
+
+<img src="docs/hud.gif" width="300" align="right" alt="Jarvis-HUD">
+
+`jarvis-hud` blendet sich ein, sobald du mit Jarvis sprichst – ein leuchtender
+Ring mit Skalen und Segmenten, der
+
+- **mit deiner Stimme pulsiert**, solange Jarvis zuhört („HÖRE ZU"),
+- beim Nachdenken schneller rotiert („VERARBEITE"),
+- die Antwort Zeichen für Zeichen einblendet und beim Vorlesen mitschwingt,
+- bei Problemen bernsteinfarben wird,
+- auch Befehle und Dateien von anderen Geräten zeigt („Datei von iPhone").
+
+Danach blendet es sich aus. Das Fenster ist randlos, durchklickbar und immer
+im Vordergrund; es startet mit `jarvisd autostart an` automatisch mit.
+`jarvis-hud --demo` zeigt eine Vorführung ohne laufenden Jarvis.
+
+```toml
+[hud]
+enabled = true
+position = "rechts-unten"   # links-unten, rechts-oben, links-oben, mitte
+```
+
+Eigener Entwurf im Stil eines Holo-Displays – keine Grafiken oder Logos aus Filmen.
 
 ## Automatisch starten
 
@@ -236,6 +262,7 @@ provider = "auto"                  # auto | ollama | claude | off
 | `jarvis-brain` | Sprachmodell für freie Sätze: Ollama (lokal) oder Claude, festes JSON-Schema |
 | `jarvis-node` | `jarvisd` und `jarvis`: Mesh, Routing, Ausführung, Dateiübertragung |
 | `jarvis-voice` | `jarvis-listen`: Mikrofon, Silero-VAD, Whisper, Weckwort |
+| `jarvis-hud` | Overlay (egui): zeigt Zuhören, Nachdenken, Antworten |
 | `jarvis-mobile` | Kern für die Handy-Apps (UniFFI → Kotlin/Swift) |
 | `mobile/android` | Android-App (Kotlin, Jetpack Compose) |
 | `mobile/ios` | iPhone/iPad-App (SwiftUI) |

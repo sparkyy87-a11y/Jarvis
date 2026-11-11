@@ -21,6 +21,27 @@ pub struct Config {
     pub brain: BrainSection,
     #[serde(default)]
     pub voice: VoiceSection,
+    #[serde(default)]
+    pub hud: HudSection,
+}
+
+/// Einstellungen für das Overlay `jarvis-hud`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HudSection {
+    /// Beim Autostart mitstarten.
+    pub enabled: bool,
+    /// "rechts-unten" (Standard), "links-unten", "rechts-oben", "links-oben", "mitte"
+    pub position: String,
+}
+
+impl Default for HudSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            position: "rechts-unten".into(),
+        }
+    }
 }
 
 /// Einstellungen für `jarvis-listen` (Spracheingabe).
@@ -218,6 +239,7 @@ impl Config {
             apps: BTreeMap::new(),
             brain: BrainSection::default(),
             voice: VoiceSection::default(),
+            hud: HudSection::default(),
         };
         cfg.pairing_key()?;
         Ok(cfg)

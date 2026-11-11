@@ -11,6 +11,7 @@ pub mod autostart;
 pub mod config;
 pub mod control;
 pub mod discovery;
+pub mod events;
 pub mod exec;
 pub mod files;
 pub mod host;

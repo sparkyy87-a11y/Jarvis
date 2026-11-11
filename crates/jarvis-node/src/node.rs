@@ -22,6 +22,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::config::Config;
+use crate::events::{describe, HudEvent};
 use crate::files;
 use crate::host::{DesktopHost, Host};
 use crate::transport::SecureConn;
@@ -82,6 +83,7 @@ pub struct Node {
     static_links: Mutex<HashMap<String, Uuid>>,
     brain: Option<Brain>,
     host: Arc<dyn Host>,
+    events: tokio::sync::broadcast::Sender<HudEvent>,
     interpreting: Mutex<HashMap<Uuid, oneshot::Sender<Interpreted>>>,
 }
 
@@ -135,6 +137,7 @@ impl Node {
             static_links: Mutex::default(),
             brain,
             host,
+            events: tokio::sync::broadcast::channel(256).0,
             interpreting: Mutex::default(),
         }))
     }
@@ -264,7 +267,7 @@ impl Node {
                         Some(f) => {
                             // Direkte Antworten gehen sofort raus, nicht über `tx`:
                             // sonst könnte die eigene Warteschlange uns blockieren.
-                            if let Some(answer) = self.clone().on_frame(f, &tx, &mut incoming).await {
+                            if let Some(answer) = self.clone().on_frame(f, &tx, &mut incoming, &info.name).await {
                                 conn.send(&answer).await?;
                             }
                         }
@@ -311,6 +314,7 @@ impl Node {
         frame: Frame,
         tx: &mpsc::Sender<Frame>,
         incoming: &mut HashMap<Uuid, Incoming>,
+        from: &str,
     ) -> Option<Frame> {
         let fail = |id, e: anyhow::Error| {
             Some(Frame::Outcome {
@@ -362,11 +366,19 @@ impl Node {
             }
             Frame::Execute { id, action } => {
                 let tx = tx.clone();
+                self.emit(HudEvent::Heard {
+                    text: describe(&action),
+                    source: Some(from.to_string()),
+                });
                 tokio::spawn(async move {
                     let (ok, message) = match self.execute_local(&action).await {
                         Ok(m) => (true, m),
                         Err(e) => (false, format!("{e:#}")),
                     };
+                    self.emit(HudEvent::Reply {
+                        text: message.clone(),
+                        ok,
+                    });
                     let _ = tx.send(Frame::Outcome { id, ok, message }).await;
                 });
                 None
@@ -403,6 +415,14 @@ impl Node {
                 match inc.finish(&sha256).await {
                     Ok(path) => {
                         info!("Datei empfangen: {}", path.display());
+                        let name = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        self.emit(HudEvent::File {
+                            name,
+                            from: from.to_string(),
+                        });
                         self.host.file_received(&path);
                         Some(Frame::Outcome {
                             id,
@@ -464,7 +484,35 @@ impl Node {
     }
 
     /// Einstiegspunkt für alles, was der Nutzer sagt oder tippt.
+    /// Ereignis an alle angemeldeten Oberflächen (HUD, Apps).
+    pub fn emit(&self, event: HudEvent) {
+        let _ = self.events.send(event);
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<HudEvent> {
+        self.events.subscribe()
+    }
+
     pub async fn handle_text(&self, text: &str) -> Reply {
+        self.handle_text_from(text, None).await
+    }
+
+    /// Wie [`Self::handle_text`]; `source` erscheint im HUD („Sprache", Gerätename).
+    pub async fn handle_text_from(&self, text: &str, source: Option<&str>) -> Reply {
+        self.emit(HudEvent::Heard {
+            text: text.to_string(),
+            source: source.map(str::to_string),
+        });
+        self.emit(HudEvent::Thinking);
+        let reply = self.handle_text_inner(text).await;
+        self.emit(HudEvent::Reply {
+            text: reply.text.clone(),
+            ok: reply.ok,
+        });
+        reply
+    }
+
+    async fn handle_text_inner(&self, text: &str) -> Reply {
         let started = std::time::Instant::now();
         let reply = match jarvis_intent::parse(text, &self.spoken_names()) {
             Some(cmd) => {

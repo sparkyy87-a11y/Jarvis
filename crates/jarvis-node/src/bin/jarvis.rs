@@ -51,6 +51,7 @@ async fn ask(
         "geräte" | "geraete" | "devices" => Request::Devices,
         _ => Request::Text {
             text: input.to_string(),
+            source: Some("Tastatur".into()),
         },
     };
     let mut line = serde_json::to_string(&req)?;

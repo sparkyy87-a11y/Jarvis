@@ -139,10 +139,13 @@ fn main() {
         }
     });
 
-    let voice = Config::load().map(|c| c.voice.enabled).unwrap_or(true);
+    let cfg = Config::load().ok();
+    let voice = cfg.as_ref().map(|c| c.voice.enabled).unwrap_or(true);
+    let hud = cfg.as_ref().map(|c| c.hud.enabled).unwrap_or(true);
     let mut services: Vec<Supervised> = [Supervised::new("jarvisd", &["run"])]
         .into_iter()
         .chain(voice.then(|| Supervised::new("jarvis-listen", &[])))
+        .chain(hud.then(|| Supervised::new("jarvis-hud", &[])))
         .flatten()
         .collect();
     if services.is_empty() {
