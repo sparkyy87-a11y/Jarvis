@@ -119,14 +119,21 @@ fn phone_uses_pc_brain_and_sends_files() {
     assert_eq!(*bridge.opened.lock().unwrap(), vec!["Spotify".to_string()]);
 
     // Datei aus dem Teilen-Menü an den PC
-    let photo = phone_dir.path().join("urlaub.jpg");
+    // Genauer Name: auf dem Mac-Runner hört der „PC" nicht auf „pc".
+    let photo_name = format!("jarvis-test-{}.jpg", std::process::id());
+    let photo = phone_dir.path().join(&photo_name);
     std::fs::write(&photo, b"JPEG...").unwrap();
     let r = phone.send_file(
         photo.to_string_lossy().into(),
-        "pc".into(),
+        "Gaming-PC".into(),
         Some("Bilder".into()),
     );
     assert!(r.ok, "{}", r.text);
-    let received = home.path().join("Pictures").join("urlaub.jpg");
-    assert_eq!(std::fs::read(received).unwrap(), b"JPEG...");
+    // Windows/macOS ermitteln „Bilder" über das System, nicht über HOME.
+    let pictures =
+        jarvis_node::files::resolve_folder(Some(&jarvis_protocol::Folder::Pictures)).unwrap();
+    let received = pictures.join(&photo_name);
+    let content = std::fs::read(&received);
+    let _ = std::fs::remove_file(&received);
+    assert_eq!(content.unwrap(), b"JPEG...");
 }

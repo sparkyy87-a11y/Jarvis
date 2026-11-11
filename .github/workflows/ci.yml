@@ -22,14 +22,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Linux-Pakete (Mikrofon, Sprachtest)
         if: runner.os == 'Linux'
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           # man-db indiziert sonst nach jeder Installation minutenlang Handbuchseiten
           sudo rm -f /var/lib/man-db/auto-update
-          sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libasound2-dev espeak-ng ffmpeg
+          # Die Paketserver sind gelegentlich kurz nicht erreichbar: bis zu dreimal versuchen.
+          for i in 1 2 3; do
+            sudo apt-get update -q && \
+            sudo apt-get install -y -q --no-install-recommends -o Acquire::Retries=3 libasound2-dev espeak-ng ffmpeg && break
+            echo "Versuch $i fehlgeschlagen, warte …"; sleep 20
+          done
       - name: Whisper-Modelle zwischenspeichern
         if: runner.os == 'Linux'
         uses: actions/cache@v4

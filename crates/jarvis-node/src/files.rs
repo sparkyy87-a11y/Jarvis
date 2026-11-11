@@ -199,12 +199,20 @@ mod tests {
         std::fs::create_dir_all(&docs).unwrap();
         std::fs::write(docs.join("Bericht.pdf"), "x").unwrap();
         std::fs::write(docs.join("Rechnung.pdf"), "x").unwrap();
-        // HOME umbiegen ist prozessweit – darum nur in diesem einen Test.
-        std::env::set_var("HOME", home.path());
-        assert_eq!(locate("Bericht").unwrap(), docs.join("Bericht.pdf"));
-        assert_eq!(locate("Berichte").unwrap(), docs.join("Bericht.pdf"));
-        assert_eq!(locate("bericht.pdf").unwrap(), docs.join("Bericht.pdf"));
-        assert!(locate("Urlaub").is_err());
+        let roots = [docs.clone()];
+        assert_eq!(
+            locate_in(&roots, "Bericht").unwrap(),
+            docs.join("Bericht.pdf")
+        );
+        assert_eq!(
+            locate_in(&roots, "Berichte").unwrap(),
+            docs.join("Bericht.pdf")
+        );
+        assert_eq!(
+            locate_in(&roots, "bericht.pdf").unwrap(),
+            docs.join("Bericht.pdf")
+        );
+        assert!(locate_in(&roots, "Urlaub").is_err());
     }
 
     #[test]
