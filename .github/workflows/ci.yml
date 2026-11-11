@@ -65,4 +65,6 @@ jobs:
             target/release/jarvis-hintergrund.exe
             target/release/jarvis-hud
             target/release/jarvis-hud.exe
+            target/release/jarvis-einstellungen
+            target/release/jarvis-einstellungen.exe
           if-no-files-found: ignore

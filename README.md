@@ -160,6 +160,23 @@ position = "rechts-unten"   # links-unten, rechts-oben, links-oben, mitte
 
 Eigener Entwurf im Stil eines Holo-Displays – keine Grafiken oder Logos aus Filmen.
 
+## Einstellungen
+
+**Jarvis-Einstellungen** (Startmenü oder `jarvis-einstellungen`) – alles ohne
+Konfigurationsdatei:
+
+- **Übersicht:** Gerätename, weitere Namen, Autostart, Neustart
+- **Geräte:** gekoppelte Geräte mit Online-Status, *Neues Gerät koppeln* mit
+  QR-Code direkt im Fenster, *Sperren* für verlorene Geräte, feste Adressen
+- **Sprache:** Spracheingabe an/aus, Mikrofon, Sprache, Genauigkeit der
+  Erkennung, Weckwort, Vorlesen
+- **Sprachmodell:** Ollama (zeigt, ob es läuft und welche Modelle da sind) oder
+  Claude mit API-Schlüssel
+- **Musik & Apps:** Musikdienst, eigene Kurzbefehle („minecraft" → Programmpfad)
+- **HUD:** an/aus, Position, Vorschau
+
+„Speichern & übernehmen" startet Jarvis mit den neuen Einstellungen neu.
+
 ## Automatisch starten
 
 ```bash
@@ -195,6 +212,13 @@ Kamera-App scannen. Jarvis öffnet sich und ist gekoppelt.
   unter „Auf meinem iPhone › Jarvis"
 - „Öffne Spotify am Handy": Android startet jede installierte App; iOS nur
   Apps mit bekanntem Link (Spotify, YouTube, WhatsApp, Netflix, Karten, …)
+
+**Ohne PC:** Die Geräte merken sich gegenseitig ihre Adressen. Ist der PC aus,
+verbinden sich z. B. iPad und Android-Handy direkt – alle festen Befehle gehen
+weiter („öffne …", „schick die Datei …", Musik, Suche). Freie Sätze brauchen das
+Sprachmodell und damit den PC (oder Claude mit API-Schlüssel). Voraussetzung:
+die Geräte waren einmal gleichzeitig mit dem PC verbunden, und auf dem iPad ist
+die App offen.
 
 **Grenzen der Systeme:** Ein Dauer-Weckwort („Jarvis" ohne Taste) erlauben
 Android und iOS fremden Apps nicht stromsparend – auf dem Handy gibt es deshalb

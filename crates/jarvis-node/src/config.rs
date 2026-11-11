@@ -137,6 +137,10 @@ pub struct BrainSection {
     pub model: Option<String>,
     /// Adresse des Ollama-Servers, Standard `http://127.0.0.1:11434`.
     pub ollama_url: Option<String>,
+    /// Claude-API-Schlüssel (sonst aus `ANTHROPIC_API_KEY`). Die Datei ist nur
+    /// für den eigenen Benutzer lesbar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,7 +162,8 @@ impl BrainSection {
     pub fn backend(&self) -> std::result::Result<Option<jarvis_brain::Backend>, String> {
         let key = std::env::var("ANTHROPIC_API_KEY")
             .ok()
-            .filter(|k| !k.is_empty());
+            .or_else(|| self.api_key.clone())
+            .filter(|k| !k.trim().is_empty());
         let ollama = || jarvis_brain::Backend::Ollama {
             url: self
                 .ollama_url

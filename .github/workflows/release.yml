@@ -23,7 +23,7 @@ jobs:
         env:
           RUSTFLAGS: -C target-feature=+crt-static
         # --target trennt Build-Skripte (Host) von den Programmen (statisch)
-        run: cargo build --release --target x86_64-pc-windows-msvc -p jarvis-node -p jarvis-voice -p jarvis-hud
+        run: cargo build --release --target x86_64-pc-windows-msvc -p jarvis-node -p jarvis-voice -p jarvis-hud -p jarvis-settings
       - name: Installer bauen (Inno Setup)
         shell: pwsh
         run: |

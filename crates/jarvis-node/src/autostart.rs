@@ -92,6 +92,27 @@ pub fn enable() -> Result<()> {
     Ok(())
 }
 
+/// Startet den laufenden Jarvis neu (z. B. nach geänderten Einstellungen).
+/// `false`, wenn er nicht über den Autostart lief.
+pub fn restart() -> Result<bool> {
+    if !is_running() {
+        return Ok(false);
+    }
+    if stop_running() {
+        wait_until(false);
+    }
+    let exe = sibling_exe(SUPERVISOR_EXE)?;
+    let mut cmd = std::process::Command::new(&exe);
+    quiet(&mut cmd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("{} startet nicht", exe.display()))?;
+    wait_until(true);
+    Ok(true)
+}
+
 /// Entfernt den Autostart-Eintrag und beendet den laufenden Jarvis.
 pub fn disable() -> Result<()> {
     unregister()?;

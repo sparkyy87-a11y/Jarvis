@@ -41,6 +41,7 @@ Name: "hud"; Description: "HUD einblenden, wenn du mit Jarvis sprichst"
 Name: "ollama"; Description: "Kostenloses lokales Sprachmodell (Ollama) – nur auf einem Gerät nötig, z. B. dem PC"; Flags: unchecked
 Name: "ollama\klein"; Description: "Kleines Modell (qwen2.5:3b, ~2 GB) – läuft auf jedem PC"; Flags: exclusive
 Name: "ollama\gross"; Description: "Großes Modell (qwen2.5:7b, ~5 GB) – mit Grafikkarte"; Flags: exclusive unchecked
+Name: "desktopicon"; Description: "Verknüpfung „Jarvis-Einstellungen“ auf dem Desktop"
 Name: "firewall"; Description: "Firewall nur für das Heimnetz (private Netzwerke) freigeben – fragt einmal nach Administratorrechten"
 
 [Files]
@@ -49,8 +50,11 @@ Source: "{#BinDir}\jarvis.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BinDir}\jarvis-listen.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BinDir}\jarvis-hud.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BinDir}\jarvis-hintergrund.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BinDir}\jarvis-einstellungen.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
+Name: "{group}\Jarvis-Einstellungen"; Filename: "{app}\jarvis-einstellungen.exe"
+Name: "{autodesktop}\Jarvis-Einstellungen"; Filename: "{app}\jarvis-einstellungen.exe"; Tasks: desktopicon
 Name: "{group}\Gerät koppeln (QR-Code)"; Filename: "{cmd}"; Parameters: "/k ""{app}\jarvisd.exe"" pair"; WorkingDir: "{app}"
 Name: "{group}\Gekoppelte Geräte"; Filename: "{cmd}"; Parameters: "/k ""{app}\jarvisd.exe"" geraete"; WorkingDir: "{app}"
 Name: "{group}\Jarvis-Konsole"; Filename: "{app}\jarvis.exe"; WorkingDir: "{app}"
@@ -76,7 +80,7 @@ Filename: "{app}\jarvis-listen.exe"; Parameters: "--nur-modelle"; StatusMsg: "Sp
 ; 5. Starten und bei jeder Anmeldung starten
 Filename: "{app}\jarvisd.exe"; Parameters: "autostart an"; StatusMsg: "Jarvis wird gestartet …"; Flags: runhidden waituntilterminated
 ; 6. Zum Schluss: QR-Code für das nächste Gerät anzeigen
-Filename: "{cmd}"; Parameters: "/k ""{app}\jarvisd.exe"" pair"; Description: "Jetzt ein weiteres Gerät koppeln (QR-Code anzeigen)"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{app}\jarvis-einstellungen.exe"; Description: "Jarvis-Einstellungen öffnen (Geräte koppeln, Mikrofon, Sprachmodell …)"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{app}\jarvisd.exe"; Parameters: "autostart aus"; Flags: runhidden waituntilterminated; RunOnceId: "JarvisStop"

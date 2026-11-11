@@ -50,7 +50,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ziel = Join-Path (Get-Location) "dist"
 New-Item -ItemType Directory -Force $ziel | Out-Null
-foreach ($exe in "jarvisd.exe", "jarvis.exe", "jarvis-listen.exe", "jarvis-hintergrund.exe", "jarvis-hud.exe") {
+foreach ($exe in "jarvisd.exe", "jarvis.exe", "jarvis-listen.exe", "jarvis-hintergrund.exe", "jarvis-hud.exe", "jarvis-einstellungen.exe") {
     Copy-Item "target\release\$exe" $ziel -Force
 }
 Write-Host ""

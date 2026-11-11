@@ -2034,6 +2034,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jarvis-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cpal",
+ "eframe",
+ "jarvis-node",
+ "qrcode",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "jarvis-voice"
 version = "0.1.0"
 dependencies = [
