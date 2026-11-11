@@ -22,7 +22,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Linux-Pakete (Mikrofon, Sprachtest)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev espeak-ng ffmpeg
+        timeout-minutes: 10
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          # man-db indiziert sonst nach jeder Installation minutenlang Handbuchseiten
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends libasound2-dev espeak-ng ffmpeg
       - name: Whisper-Modelle zwischenspeichern
         if: runner.os == 'Linux'
         uses: actions/cache@v4
