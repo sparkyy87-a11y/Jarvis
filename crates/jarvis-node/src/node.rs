@@ -123,6 +123,7 @@ impl Node {
             platform: cfg.platform(),
             aliases: cfg.device.aliases.clone(),
             capabilities: capabilities_for(cfg.platform()),
+            port: cfg.mesh.port,
         };
         let brain = match cfg.brain.backend() {
             Ok(Some(backend)) => {
@@ -198,17 +199,33 @@ impl Node {
         self.peers.lock().unwrap().contains_key(id)
     }
 
-    /// Verbindet regelmäßig die fest eingetragenen Adressen.
+    /// Verbindet regelmäßig die fest eingetragenen und die gelernten Adressen
+    /// gekoppelter Geräte – so finden sich z. B. iPad und Handy auch ohne PC.
     /// Wartezeit wächst von 1 s bis 15 s, solange ein Gerät nicht erreichbar ist.
     pub async fn maintain_static_peers(self: Arc<Self>) {
         let mut delay = Duration::from_secs(1);
         loop {
             let mut all_connected = true;
-            for addr in self.cfg.mesh.static_peers.clone() {
-                let linked = self.static_links.lock().unwrap().get(&addr).copied();
-                if linked.is_some_and(|id| self.is_connected(&id)) {
-                    continue;
+            let connected: Vec<String> = self
+                .peers
+                .lock()
+                .unwrap()
+                .values()
+                .map(|p| p.key.clone())
+                .collect();
+            let mut targets: Vec<(String, Option<String>)> = Vec::new();
+            for addr in &self.cfg.mesh.static_peers {
+                let linked = self.static_links.lock().unwrap().get(addr).copied();
+                if !linked.is_some_and(|id| self.is_connected(&id)) {
+                    targets.push((addr.clone(), Some(addr.clone())));
                 }
+            }
+            for (key, addr) in self.trust.lock().unwrap().known_addresses() {
+                if !connected.contains(&key) && !targets.iter().any(|(a, _)| *a == addr) {
+                    targets.push((addr, None));
+                }
+            }
+            for (addr, static_addr) in targets {
                 all_connected = false;
                 let Ok(sock) = tokio::net::lookup_host(&addr).await.map(|mut a| a.next()) else {
                     continue;
@@ -216,7 +233,7 @@ impl Node {
                 let Some(sock) = sock else { continue };
                 let node = self.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = node.connect(sock, Some(addr.clone())).await {
+                    if let Err(e) = node.connect(sock, static_addr).await {
                         debug!("{addr} nicht erreichbar: {e:#}");
                     }
                 });
@@ -277,13 +294,17 @@ impl Node {
             bail!("Verbindung zu mir selbst");
         }
         // Listen abgleichen: was das Gegenüber kennt bzw. gesperrt hat, übernehmen.
-        let newly_revoked = {
+        let (newly_revoked, changed) = {
             let mut t = self.trust.lock().unwrap();
+            let before = t.entries();
             t.add(&key, info.id, &info.name);
+            // Adresse merken, unter der das Gerät Verbindungen annimmt.
+            t.observe(&key, SocketAddr::new(addr.ip(), info.port).to_string());
             let own = self.identity.public_hex();
             let newly = t.merge(&own, &their_trusted, &their_revoked);
             let _ = t.save(&self.trust_path);
-            newly
+            let changed = t.entries() != before || !newly.is_empty();
+            (newly, changed)
         };
         self.disconnect_keys(&newly_revoked);
         if newly_revoked.contains(&key) {
@@ -309,6 +330,9 @@ impl Node {
             return Ok(());
         }
         info!("Verbunden mit {} ({:?}, {addr})", info.name, info.platform);
+        if changed {
+            self.broadcast_trust(Some(&key));
+        }
 
         let mut incoming: HashMap<Uuid, Incoming> = HashMap::new();
         let result: Result<()> = async {
@@ -413,6 +437,23 @@ impl Node {
                 ok: true,
             });
             Ok(())
+        }
+    }
+
+    /// Schickt die aktuelle Vertrauensliste an alle verbundenen Geräte
+    /// (außer `except`, das sie gerade im Hello bekommen hat).
+    fn broadcast_trust(&self, except: Option<&str>) {
+        let (trusted, revoked) = {
+            let t = self.trust.lock().unwrap();
+            (t.entries(), t.revoked_keys())
+        };
+        for p in self.peers.lock().unwrap().values() {
+            if Some(p.key.as_str()) != except {
+                let _ = p.tx.try_send(Frame::Sync {
+                    trusted: trusted.clone(),
+                    revoked: revoked.clone(),
+                });
+            }
         }
     }
 
@@ -540,6 +581,24 @@ impl Node {
             | Frame::Hello { .. }
             | Frame::PairRequest { .. }
             | Frame::PairResult { .. } => None,
+            Frame::Sync { trusted, revoked } => {
+                let (newly, changed) = {
+                    let mut t = self.trust.lock().unwrap();
+                    let before = t.entries();
+                    let newly = t.merge(&self.identity.public_hex(), &trusted, &revoked);
+                    let changed = t.entries() != before || !newly.is_empty();
+                    if changed {
+                        let _ = t.save(&self.trust_path);
+                    }
+                    (newly, changed)
+                };
+                self.disconnect_keys(&newly);
+                if changed {
+                    // Weitergeben – nur bei echter Änderung, damit nichts endlos kreist.
+                    self.broadcast_trust(None);
+                }
+                None
+            }
             Frame::Revoke { key } => {
                 if key != self.identity.public_hex() {
                     let name = {

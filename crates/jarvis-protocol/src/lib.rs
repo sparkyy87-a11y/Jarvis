@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Version des Drahtprotokolls. Wird im `Hello` ausgetauscht.
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Größe eines Datei-Chunks. Muss zusammen mit dem Frame-Overhead unter die
 /// Noise-Grenze von 65 535 Byte pro Nachricht passen.
@@ -76,6 +76,8 @@ pub struct DeviceInfo {
     /// Zusätzliche Namen, unter denen das Gerät angesprochen werden darf.
     pub aliases: Vec<String>,
     pub capabilities: Vec<Capability>,
+    /// Port, auf dem das Gerät Verbindungen annimmt.
+    pub port: u16,
 }
 
 impl DeviceInfo {
@@ -234,6 +236,11 @@ pub struct TrustEntry {
     pub key: String,
     pub id: Uuid,
     pub name: String,
+    /// Zuletzt bekannte Adresse ("192.168.1.42:7879") – so finden sich Geräte
+    /// auch ohne PC (z. B. iPad und Android-Handy direkt).
+    pub addr: Option<String>,
+    /// Wann diese Adresse zuletzt bestätigt wurde (Unix-Sekunden).
+    pub seen: u64,
 }
 
 /// Eine Nachricht zwischen zwei verbundenen Geräten.
@@ -259,6 +266,11 @@ pub enum Frame {
     /// Gerät mit diesem Schlüssel ist gesperrt (verloren, verkauft …).
     Revoke {
         key: String,
+    },
+    /// Geänderte Vertrauensliste (neues Gerät, neue Adresse) – an alle Verbundenen.
+    Sync {
+        trusted: Vec<TrustEntry>,
+        revoked: Vec<String>,
     },
     Execute {
         id: Uuid,

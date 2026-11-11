@@ -25,6 +25,11 @@ pub const INVITE_SECONDS: u64 = 600;
 pub struct TrustedDevice {
     pub id: Uuid,
     pub name: String,
+    /// Zuletzt bekannte Adresse des Geräts.
+    #[serde(default)]
+    pub addr: Option<String>,
+    #[serde(default)]
+    pub seen: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,14 +106,35 @@ impl TrustStore {
         if self.is_revoked(key) {
             return false;
         }
-        self.devices.insert(
-            key.to_string(),
-            TrustedDevice {
+        let d = self
+            .devices
+            .entry(key.to_string())
+            .or_insert(TrustedDevice {
                 id,
                 name: name.to_string(),
-            },
-        );
+                addr: None,
+                seen: 0,
+            });
+        d.id = id;
+        d.name = name.to_string();
         true
+    }
+
+    /// Adresse, unter der ein Gerät gerade direkt erreichbar war.
+    pub fn observe(&mut self, key: &str, addr: String) {
+        if let Some(d) = self.devices.get_mut(key) {
+            d.addr = Some(addr);
+            d.seen = now();
+        }
+    }
+
+    /// Gekoppelte Geräte mit bekannter Adresse (zum Verbinden ohne PC).
+    pub fn known_addresses(&self) -> Vec<(String, String)> {
+        self.devices
+            .iter()
+            .filter(|(k, _)| !self.is_revoked(k))
+            .filter_map(|(k, d)| d.addr.clone().map(|a| (k.clone(), a)))
+            .collect()
     }
 
     pub fn revoke(&mut self, key: &str) -> Option<String> {
@@ -152,6 +178,8 @@ impl TrustStore {
                 key: key.clone(),
                 id: d.id,
                 name: d.name.clone(),
+                addr: d.addr.clone(),
+                seen: d.seen,
             })
             .collect()
     }
@@ -178,10 +206,17 @@ impl TrustStore {
         }
         for e in trusted {
             if e.key != own_key && !self.is_revoked(&e.key) {
-                self.devices.entry(e.key.clone()).or_insert(TrustedDevice {
+                let d = self.devices.entry(e.key.clone()).or_insert(TrustedDevice {
                     id: e.id,
                     name: e.name.clone(),
+                    addr: None,
+                    seen: 0,
                 });
+                // Neuere Adresse übernehmen (das andere Gerät hat es später gesehen).
+                if e.addr.is_some() && e.seen > d.seen {
+                    d.addr = e.addr.clone();
+                    d.seen = e.seen;
+                }
             }
         }
         newly
@@ -222,6 +257,8 @@ mod tests {
             key: key.into(),
             id: Uuid::new_v4(),
             name: name.into(),
+            addr: None,
+            seen: 0,
         }
     }
 
@@ -286,5 +323,31 @@ mod tests {
             std::fs::metadata(&p).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn addresses_spread_and_fresher_wins() {
+        // PC kennt Handy (frisch) – iPad lernt die Adresse vom PC.
+        let mut pc = TrustStore::default();
+        pc.add("handy", Uuid::new_v4(), "Handy");
+        pc.observe("handy", "192.168.1.42:7879".into());
+        let mut ipad = TrustStore::default();
+        ipad.merge("ipad", &pc.entries(), &[]);
+        assert_eq!(
+            ipad.known_addresses(),
+            vec![("handy".to_string(), "192.168.1.42:7879".to_string())]
+        );
+        // Ältere Info überschreibt keine neuere.
+        let mut old = pc.entries();
+        old[0].addr = Some("10.0.0.9:7879".into());
+        old[0].seen -= 100;
+        ipad.merge("ipad", &old, &[]);
+        assert_eq!(
+            ipad.devices["handy"].addr.as_deref(),
+            Some("192.168.1.42:7879")
+        );
+        // Name ändern behält die Adresse.
+        ipad.add("handy", ipad.devices["handy"].id, "Pixel");
+        assert!(ipad.devices["handy"].addr.is_some());
     }
 }
