@@ -24,6 +24,8 @@ final class JarvisModel: ObservableObject {
     @Published var paired = false
     @Published var entries: [Entry] = []
     @Published var devices: [Device] = []
+    /// Name des Hauptgeräts (verwaltet Kopplung, Sperren und Rechte).
+    @Published var adminName: String?
     @Published var message: String?
     /// Code aus einem jarvis://-Link (wird nur vorausgefüllt).
     @Published var pendingCode = ""
@@ -177,8 +179,9 @@ final class JarvisModel: ObservableObject {
         pollTask = Task {
             while !Task.isCancelled {
                 if let j = jarvis {
-                    let (list, state) = await Task.detached { (j.devices(), j.status()) }.value
+                    let (list, state, members) = await Task.detached { (j.devices(), j.status(), j.members()) }.value
                     devices = list.filter { !$0.thisDevice }
+                    adminName = members.first(where: { $0.admin })?.name
                     status = state
                 }
                 try? await Task.sleep(for: .seconds(2))

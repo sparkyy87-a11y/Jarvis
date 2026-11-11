@@ -8,6 +8,8 @@
 //! `{"cmd":"auth","token":"…"}` -> `{"ok":true}` (immer zuerst)
 //! `{"cmd":"text","text":"öffne Minecraft"}` -> `{"ok":true,"text":"Minecraft wird gestartet."}`
 //! `{"cmd":"devices"}` / `{"cmd":"trusted"}` / `{"cmd":"pair"}` / `{"cmd":"revoke","name":"…"}`
+//! `{"cmd":"permissions","name":"PC","control":false}` / `{"cmd":"makeadmin","name":"…"}`
+//! (koppeln, sperren und Rechte ändern geht nur am Hauptgerät)
 //! `{"cmd":"subscribe"}` -> fortlaufend Ereignisse (siehe `events`)
 //! `{"cmd":"event","event":{…}}` -> keine Antwort
 
@@ -52,6 +54,21 @@ pub enum Request {
     Revoke {
         name: String,
     },
+    /// Rechte eines Geräts ändern (nur am Hauptgerät).
+    Permissions {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        control: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        files: Option<bool>,
+        /// Darf auch das Hauptgerät steuern.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        main: Option<bool>,
+    },
+    /// Hauptrolle an ein anderes Gerät abgeben (nur am Hauptgerät).
+    MakeAdmin {
+        name: String,
+    },
     /// Verbindung wird zum Ereignisstrom (eine JSON-Zeile pro [`HudEvent`]).
     Subscribe,
     /// Eigenes Ereignis an alle Abonnenten verteilen (z. B. von jarvis-listen).
@@ -91,10 +108,38 @@ pub struct DeviceEntry {
     pub address: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrustedEntry {
     pub name: String,
     pub online: bool,
+    #[serde(default)]
+    pub this_device: bool,
+    /// Hauptgerät.
+    #[serde(default)]
+    pub admin: bool,
+    /// Darf andere Geräte steuern.
+    #[serde(default)]
+    pub control: bool,
+    /// Darf Dateien schicken.
+    #[serde(default)]
+    pub files: bool,
+    /// Darf auch das Hauptgerät steuern.
+    #[serde(default)]
+    pub control_main: bool,
+}
+
+impl From<crate::node::MemberStatus> for TrustedEntry {
+    fn from(m: crate::node::MemberStatus) -> Self {
+        Self {
+            name: m.name,
+            online: m.online,
+            this_device: m.this_device,
+            admin: m.admin,
+            control: m.control,
+            files: m.files,
+            control_main: m.control_main,
+        }
+    }
 }
 
 impl From<DeviceStatus> for DeviceEntry {
@@ -252,12 +297,7 @@ pub async fn serve(node: Arc<Node>, port: u16, token: String) -> Result<()> {
                     },
                     Ok(Request::Trusted) => Response {
                         ok: true,
-                        trusted: Some(
-                            node.trusted_devices()
-                                .into_iter()
-                                .map(|(name, online)| TrustedEntry { name, online })
-                                .collect(),
-                        ),
+                        trusted: Some(node.trusted_devices().into_iter().map(Into::into).collect()),
                         ..Default::default()
                     },
                     Ok(Request::Pair { addrs }) => match node.create_invite(addrs) {
@@ -269,6 +309,19 @@ pub async fn serve(node: Arc<Node>, port: u16, token: String) -> Result<()> {
                         Err(e) => Response::text(false, format!("{e:#}")),
                     },
                     Ok(Request::Revoke { name }) => match node.revoke(&name).await {
+                        Ok(text) => Response::text(true, text),
+                        Err(e) => Response::text(false, format!("{e:#}")),
+                    },
+                    Ok(Request::Permissions {
+                        name,
+                        control,
+                        files,
+                        main,
+                    }) => match node.set_permissions(&name, control, files, main) {
+                        Ok(text) => Response::text(true, text),
+                        Err(e) => Response::text(false, format!("{e:#}")),
+                    },
+                    Ok(Request::MakeAdmin { name }) => match node.make_admin(&name) {
                         Ok(text) => Response::text(true, text),
                         Err(e) => Response::text(false, format!("{e:#}")),
                     },

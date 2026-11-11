@@ -51,6 +51,22 @@ pub struct Device {
     pub address: Option<String>,
 }
 
+/// Ein gekoppeltes Gerät mit Rolle und Rechten (verwaltet am Hauptgerät).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Member {
+    pub name: String,
+    pub online: bool,
+    pub this_device: bool,
+    /// Hauptgerät: koppelt, sperrt, vergibt Rechte.
+    pub admin: bool,
+    /// Darf andere Geräte steuern.
+    pub control: bool,
+    /// Darf auch das Hauptgerät steuern.
+    pub control_main: bool,
+    /// Darf Dateien schicken.
+    pub files: bool,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct PairingInfo {
     /// Gerät, das den Code gezeigt hat (meist der PC).
@@ -109,6 +125,7 @@ pub fn pair(
         cfg.device.id = old.device.id;
         cfg.device.private_key = old.device.private_key;
         cfg.device.public_key = old.device.public_key;
+        cfg.device.signing_key = old.device.signing_key;
     }
     cfg.device.platform = Some(platform);
     cfg.mesh.static_peers = p.addrs.clone();
@@ -124,6 +141,7 @@ pub fn pair(
     trust.joining = Some(Joining {
         token: p.token,
         key: p.key,
+        sign_key: p.sign_key,
         name: p.name.clone(),
     });
     trust.save(&cfg.trust_path())?;
@@ -230,6 +248,23 @@ impl Jarvis {
                 platform: format!("{:?}", d.platform),
                 this_device: d.this_device,
                 address: d.address,
+            })
+            .collect()
+    }
+
+    /// Alle gekoppelten Geräte (auch offline), Hauptgerät zuerst.
+    pub fn members(&self) -> Vec<Member> {
+        self.node
+            .trusted_devices()
+            .into_iter()
+            .map(|m| Member {
+                name: m.name,
+                online: m.online,
+                this_device: m.this_device,
+                admin: m.admin,
+                control: m.control,
+                control_main: m.control_main,
+                files: m.files,
             })
             .collect()
     }
@@ -398,8 +433,9 @@ mod tests {
 
     fn code() -> String {
         format!(
-            "jarvis://pair?v=2&key={}&token={}&name=Gaming-PC&addr=127.0.0.1:1",
+            "jarvis://pair?v=3&key={}&skey={}&token={}&name=Gaming-PC&addr=127.0.0.1:1",
             "ab".repeat(32),
+            "ef".repeat(32),
             "cd".repeat(16)
         )
     }

@@ -9,6 +9,9 @@ use crate::config::Config;
 pub struct Pairing {
     /// Öffentlicher Schlüssel des Geräts, das den Code zeigt (Fingerabdruck).
     pub key: String,
+    /// Öffentlicher Signaturschlüssel des Hauptgeräts – nur damit unterschriebene
+    /// Gerätelisten werden übernommen.
+    pub sign_key: String,
     /// Einmal-Code (10 Minuten gültig, nur einmal nutzbar).
     pub token: String,
     /// Name des Geräts, das den Code gezeigt hat.
@@ -27,8 +30,9 @@ pub fn link_for(cfg: &Config, token: &str, addrs: Option<Vec<String>>) -> String
             .collect()
     });
     let mut url = format!(
-        "jarvis://pair?v=2&key={}&token={}&name={}",
+        "jarvis://pair?v=3&key={}&skey={}&token={}&name={}",
         cfg.device.public_key,
+        cfg.sign_public().unwrap_or_default(),
         token,
         encode(&cfg.device.name)
     );
@@ -43,13 +47,14 @@ pub fn parse(link: &str) -> Result<Pairing> {
         .trim()
         .strip_prefix("jarvis://pair?")
         .context("Das ist kein Jarvis-Kopplungscode")?;
-    let (mut key, mut token, mut name, mut addrs) =
-        (None, None, String::from("Jarvis"), Vec::new());
+    let (mut key, mut skey, mut token, mut name, mut addrs) =
+        (None, None, None, String::from("Jarvis"), Vec::new());
     for part in query.split('&') {
         let (k, v) = part.split_once('=').unwrap_or((part, ""));
         let v = decode(v);
         match k {
             "key" => key = Some(v),
+            "skey" => skey = Some(v),
             "token" => token = Some(v),
             "name" => name = v,
             "addr" => addrs.push(v),
@@ -60,14 +65,18 @@ pub fn parse(link: &str) -> Result<Pairing> {
     let key = key
         .filter(|k| hexlen(k, 64))
         .context("Kopplungscode ist unvollständig (Schlüssel fehlt)")?;
+    let sign_key = skey
+        .filter(|k| hexlen(k, 64))
+        .context("Kopplungscode ist veraltet – bitte Jarvis auf dem Hauptgerät aktualisieren")?;
     let token = token
         .filter(|t| hexlen(t, 32))
-        .context("Kopplungscode ist veraltet – am PC neu `jarvisd pair` ausführen")?;
+        .context("Kopplungscode ist veraltet – am Hauptgerät einen neuen Code anzeigen")?;
     if addrs.is_empty() {
         bail!("Kopplungscode enthält keine Adresse");
     }
     Ok(Pairing {
         key: key.to_lowercase(),
+        sign_key: sign_key.to_lowercase(),
         token,
         name,
         addrs,
@@ -136,6 +145,8 @@ mod tests {
         );
         let p = parse(&link).unwrap();
         assert_eq!(p.key, cfg.device.public_key);
+        assert_eq!(p.sign_key, cfg.sign_public().unwrap());
+        assert!(!link.contains(&cfg.device.signing_key));
         assert_eq!(p.token, token);
         assert_eq!(p.name, "Gaming-PC Ü");
         assert_eq!(p.addrs, vec!["192.168.1.20:7879"]);

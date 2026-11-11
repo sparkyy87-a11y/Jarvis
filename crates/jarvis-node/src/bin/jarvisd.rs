@@ -20,7 +20,7 @@ struct Cli {
 enum Cmd {
     /// Dienst starten (Standard).
     Run,
-    /// Erstes Gerät einrichten (eigener Geräteschlüssel wird erzeugt).
+    /// Erstes Gerät einrichten – es wird das Hauptgerät (koppelt, sperrt, vergibt Rechte).
     Init {
         /// Name dieses Geräts, z. B. "Gaming-PC" oder "Laptop".
         #[arg(long)]
@@ -40,8 +40,25 @@ enum Cmd {
     Pair,
     /// Alle gekoppelten Geräte anzeigen (auch offline).
     Geraete,
-    /// Ein Gerät dauerhaft sperren (verloren, verkauft …).
+    /// Ein Gerät dauerhaft sperren (verloren, verkauft …). Nur am Hauptgerät.
     Entfernen { name: String },
+    /// Rechte eines Geräts ändern (nur am Hauptgerät), z. B.
+    /// `jarvisd rechte PC --steuern nein --dateien ja` oder
+    /// `jarvisd rechte iPhone --hauptgeraet ja`.
+    Rechte {
+        name: String,
+        /// Darf dieses Gerät andere Geräte steuern?
+        #[arg(long, value_enum)]
+        steuern: Option<JaNein>,
+        /// Darf dieses Gerät Dateien an andere schicken?
+        #[arg(long, value_enum)]
+        dateien: Option<JaNein>,
+        /// Darf dieses Gerät auch das Hauptgerät steuern? (für deine eigenen Geräte)
+        #[arg(long, value_enum)]
+        hauptgeraet: Option<JaNein>,
+    },
+    /// Hauptrolle an ein anderes Gerät abgeben (nur am Hauptgerät).
+    Hauptgeraet { name: String },
     /// Jarvis beim Anmelden automatisch starten: an, aus oder status.
     Autostart {
         #[arg(value_enum, default_value = "status")]
@@ -80,6 +97,18 @@ impl SetupOpts {
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
+enum JaNein {
+    Ja,
+    Nein,
+}
+
+impl From<JaNein> for bool {
+    fn from(v: JaNein) -> bool {
+        matches!(v, JaNein::Ja)
+    }
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
 enum AutostartMode {
     An,
     Aus,
@@ -104,20 +133,68 @@ async fn main() -> Result<()> {
         Cmd::Geraete => {
             let resp = ask(&Request::Trusted)?;
             for d in resp.trusted.unwrap_or_default() {
+                let role = if d.admin {
+                    "Hauptgerät".to_string()
+                } else {
+                    let mut r = vec![];
+                    r.push(if d.control {
+                        "steuert andere"
+                    } else {
+                        "steuert nichts"
+                    });
+                    if d.control_main {
+                        r.push("auch das Hauptgerät");
+                    }
+                    r.push(if d.files {
+                        "schickt Dateien"
+                    } else {
+                        "keine Dateien"
+                    });
+                    r.join(", ")
+                };
                 println!(
-                    "• {}{}",
+                    "• {}{} – {role}{}",
                     d.name,
-                    if d.online { "  (verbunden)" } else { "" }
+                    if d.this_device {
+                        " (dieses Gerät)"
+                    } else {
+                        ""
+                    },
+                    if d.online { "  · verbunden" } else { "" }
                 );
             }
             Ok(())
         }
-        Cmd::Entfernen { name } => {
-            let resp = ask(&Request::Revoke { name })?;
-            println!("{}", resp.text.unwrap_or_default());
-            Ok(())
+        Cmd::Entfernen { name } => answer(&Request::Revoke { name }),
+        Cmd::Rechte {
+            name,
+            steuern,
+            dateien,
+            hauptgeraet,
+        } => {
+            if steuern.is_none() && dateien.is_none() && hauptgeraet.is_none() {
+                bail!("Bitte --steuern, --hauptgeraet und/oder --dateien mit ja|nein angeben.");
+            }
+            answer(&Request::Permissions {
+                name,
+                control: steuern.map(Into::into),
+                files: dateien.map(Into::into),
+                main: hauptgeraet.map(Into::into),
+            })
         }
+        Cmd::Hauptgeraet { name } => answer(&Request::MakeAdmin { name }),
     }
+}
+
+/// Anfrage stellen und Antwort ausgeben; Fehler als Fehler melden.
+fn answer(req: &Request) -> Result<()> {
+    let resp = ask(req)?;
+    let text = resp.text.unwrap_or_default();
+    if !resp.ok {
+        bail!("{text}");
+    }
+    println!("{text}");
+    Ok(())
 }
 
 /// Anfrage an den laufenden Dienst.
@@ -189,6 +266,7 @@ fn init(name: Option<String>, opts: SetupOpts) -> Result<()> {
     opts.apply(&mut cfg);
     cfg.save()?;
     println!("Eingerichtet: „{}“ ({})", cfg.device.name, path.display());
+    println!("„{}“ ist das Hauptgerät: nur hier koppelst du neue Geräte, sperrst sie und vergibst Rechte.", cfg.device.name);
     println!("\nWeitere Geräte koppeln: Dienst starten (`jarvisd` oder `jarvisd autostart an`),");
     println!("dann `jarvisd pair` – zeigt einen QR-Code mit Einmal-Code.");
     Ok(())
@@ -212,6 +290,7 @@ fn join(code: &str, name: Option<String>, opts: SetupOpts) -> Result<()> {
         joining: Some(Joining {
             token: p.token,
             key: p.key,
+            sign_key: p.sign_key,
             name: p.name.clone(),
         }),
         ..Default::default()

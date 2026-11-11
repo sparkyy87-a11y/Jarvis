@@ -11,7 +11,7 @@ use eframe::egui::{self, Color32, RichText};
 use form::Form;
 use jarvis_node::autostart;
 use jarvis_node::config::{BrainProvider, Config};
-use jarvis_node::control::{self, Request};
+use jarvis_node::control::{self, Request, TrustedEntry};
 
 const CYAN: Color32 = Color32::from_rgb(79, 209, 255);
 const AMBER: Color32 = Color32::from_rgb(255, 170, 70);
@@ -73,8 +73,10 @@ struct App {
 
     running: bool,
     autostart_on: bool,
-    trusted: Vec<(String, bool)>,
-    trusted_task: Task<Result<Vec<(String, bool)>, String>>,
+    trusted: Vec<TrustedEntry>,
+    trusted_task: Task<Result<Vec<TrustedEntry>, String>>,
+    /// Rückfrage: Hauptrolle an dieses Gerät abgeben?
+    admin_confirm: Option<String>,
     last_refresh: Instant,
     pairing: Option<(String, egui::TextureHandle, Instant)>,
     pair_task: Task<Result<String, String>>,
@@ -103,6 +105,7 @@ impl App {
             autostart_on: autostart::status().map(|s| s.enabled).unwrap_or(false),
             trusted: Vec::new(),
             trusted_task: Task::none(),
+            admin_confirm: None,
             last_refresh: Instant::now() - Duration::from_secs(60),
             pairing: None,
             pair_task: Task::none(),
@@ -201,13 +204,7 @@ impl App {
             if let Some((port, token)) = self.control() {
                 self.trusted_task = Task::spawn(ctx, move || {
                     control::request_blocking(port, &token, &Request::Trusted)
-                        .map(|r| {
-                            r.trusted
-                                .unwrap_or_default()
-                                .into_iter()
-                                .map(|t| (t.name, t.online))
-                                .collect()
-                        })
+                        .map(|r| r.trusted.unwrap_or_default())
                         .map_err(|e| format!("{e:#}"))
                 });
             }
@@ -336,6 +333,7 @@ impl eframe::App for App {
         });
 
         self.revoke_dialog(ctx);
+        self.admin_dialog(ctx);
     }
 }
 
@@ -464,30 +462,112 @@ impl App {
                     RichText::new("Jarvis läuft nicht – die Liste erscheint, sobald Jarvis läuft.")
                         .color(AMBER),
                 );
-            } else if self.trusted.is_empty() {
+            } else if self.trusted.len() <= 1 {
                 ui.label("Noch keine weiteren Geräte. Koppel unten das erste.");
             }
-            for (name, online) in self.trusted.clone() {
-                ui.horizontal(|ui| {
-                    dot(ui, if online { GREEN } else { Color32::GRAY });
-                    ui.label(RichText::new(&name).size(15.0));
+            let i_am_admin = self.trusted.iter().any(|t| t.this_device && t.admin);
+            let admin_name = self
+                .trusted
+                .iter()
+                .find(|t| t.admin)
+                .map(|t| t.name.clone());
+            if self.running && !i_am_admin {
+                if let Some(a) = &admin_name {
                     ui.label(
-                        RichText::new(if online {
-                            "verbunden"
-                        } else {
-                            "nicht verbunden"
-                        })
+                        RichText::new(format!(
+                            "Rechte, Sperren und neue Geräte verwaltet das Hauptgerät „{a}“."
+                        ))
                         .weak(),
                     );
+                }
+            }
+            let mut request = None;
+            for t in self.trusted.clone() {
+                ui.horizontal(|ui| {
+                    dot(
+                        ui,
+                        if t.online || t.this_device {
+                            GREEN
+                        } else {
+                            Color32::GRAY
+                        },
+                    );
+                    ui.label(RichText::new(&t.name).size(15.0));
+                    let state = match (t.admin, t.this_device, t.online) {
+                        (true, true, _) => "Hauptgerät · dieses Gerät",
+                        (true, false, true) => "Hauptgerät · verbunden",
+                        (true, false, false) => "Hauptgerät",
+                        (false, true, _) => "dieses Gerät",
+                        (false, false, true) => "verbunden",
+                        (false, false, false) => "nicht verbunden",
+                    };
+                    ui.label(RichText::new(state).weak());
+                    if t.admin || !i_am_admin {
+                        return;
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("Sperren …").clicked() {
-                            self.revoke_confirm = Some(name.clone());
+                            self.revoke_confirm = Some(t.name.clone());
+                        }
+                        if ui.button("Zum Hauptgerät …").clicked() {
+                            self.admin_confirm = Some(t.name.clone());
                         }
                     });
                 });
+                if t.admin {
+                    continue;
+                }
+                // Rechte in eigener Zeile; ändern kann sie nur das Hauptgerät.
+                ui.horizontal(|ui| {
+                    ui.add_space(22.0);
+                    ui.add_enabled_ui(i_am_admin, |ui| {
+                        let mut control = t.control;
+                        if ui.checkbox(&mut control, "andere Geräte steuern").changed() {
+                            request = Some(Request::Permissions {
+                                name: t.name.clone(),
+                                control: Some(control),
+                                files: None,
+                                main: None,
+                            });
+                        }
+                        let mut main = t.control_main;
+                        if ui
+                            .checkbox(&mut main, "Hauptgerät steuern")
+                            .on_hover_text(
+                                "Für deine eigenen Geräte: darf auch das Hauptgerät steuern.",
+                            )
+                            .changed()
+                        {
+                            request = Some(Request::Permissions {
+                                name: t.name.clone(),
+                                control: None,
+                                files: None,
+                                main: Some(main),
+                            });
+                        }
+                        let mut files = t.files;
+                        if ui.checkbox(&mut files, "Dateien schicken").changed() {
+                            request = Some(Request::Permissions {
+                                name: t.name.clone(),
+                                control: None,
+                                files: Some(files),
+                                main: None,
+                            });
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+            }
+            if let Some(req) = request {
+                self.admin_request(ctx, req);
             }
         });
+        let i_am_admin = self.trusted.iter().any(|t| t.this_device && t.admin);
         section(ui, "Neues Gerät koppeln", |ui| {
+            if self.running && !i_am_admin {
+                ui.label("Neue Geräte koppelst du am Hauptgerät.");
+                return;
+            }
             if let Some((link, tex, since)) = &self.pairing {
                 let left = 600i64 - since.elapsed().as_secs() as i64;
                 if left <= 0 {
@@ -538,6 +618,58 @@ impl App {
                     .desired_width(320.0),
             );
         });
+    }
+
+    /// Anfrage an den Dienst im Hintergrund; Ergebnis erscheint als Meldung.
+    fn admin_request(&mut self, ctx: &egui::Context, req: Request) {
+        if let Some((port, token)) = self.control() {
+            self.revoke_task = Task::spawn(ctx, move || {
+                let r =
+                    control::request_blocking(port, &token, &req).map_err(|e| format!("{e:#}"))?;
+                let text = r.text.unwrap_or_default();
+                if r.ok {
+                    Ok(text)
+                } else {
+                    Err(text)
+                }
+            });
+        }
+    }
+
+    fn admin_dialog(&mut self, ctx: &egui::Context) {
+        let Some(name) = self.admin_confirm.clone() else {
+            return;
+        };
+        let modal = egui::Modal::new(egui::Id::new("admin")).show(ctx, |ui| {
+            ui.set_width(380.0);
+            ui.label(
+                RichText::new(format!("„{name}“ zum Hauptgerät machen?"))
+                    .size(18.0)
+                    .strong(),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                "Danach kann nur noch „".to_string()
+                    + &name
+                    + "“ Geräte koppeln, sperren und Rechte vergeben – dieses Gerät nicht mehr.",
+            );
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .button(RichText::new("Hauptrolle abgeben").color(AMBER))
+                    .clicked()
+                {
+                    self.admin_request(ctx, Request::MakeAdmin { name: name.clone() });
+                    self.admin_confirm = None;
+                }
+                if ui.button("Abbrechen").clicked() {
+                    self.admin_confirm = None;
+                }
+            });
+        });
+        if modal.should_close() {
+            self.admin_confirm = None;
+        }
     }
 
     fn revoke_dialog(&mut self, ctx: &egui::Context) {

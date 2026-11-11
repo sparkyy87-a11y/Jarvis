@@ -112,15 +112,15 @@ begin
 
   ModePage := CreateInputOptionPage(NamePage.ID,
     'Erstes Gerät oder koppeln?', 'Ist das dein erstes Jarvis-Gerät?',
-    'Weitere Geräte koppelst du mit einem Einmal-Code vom ersten Gerät (Startmenü › Jarvis › Gerät koppeln).',
+    'Das erste Gerät wird dein HAUPTGERÄT: nur dort koppelst du neue Geräte, sperrst sie und vergibst Rechte. Installiere es also auf dem Gerät, das du selbst benutzt (z. B. deinem Laptop). Weitere Geräte koppelst du mit einem Einmal-Code vom Hauptgerät.',
     True, False);
-  ModePage.Add('Das ist mein erstes Jarvis-Gerät (z. B. der PC)');
+  ModePage.Add('Das ist mein erstes Jarvis-Gerät – es wird das Hauptgerät');
   ModePage.Add('Mit einem vorhandenen Jarvis koppeln (Code einfügen)');
   ModePage.Values[0] := True;
 
   CodePage := CreateInputQueryPage(ModePage.ID,
-    'Kopplungscode', 'Code vom ersten Gerät einfügen',
-    'Am ersten Gerät: Startmenü › Jarvis › „Gerät koppeln“ und die Zeile jarvis://pair?… kopieren. Der Code gilt 10 Minuten.');
+    'Kopplungscode', 'Code vom Hauptgerät einfügen',
+    'Am Hauptgerät: Startmenü › Jarvis › „Gerät koppeln“ und die Zeile jarvis://pair?… kopieren. Der Code gilt 10 Minuten.');
   CodePage.Add('Code (jarvis://pair?…):', False);
 end;
 

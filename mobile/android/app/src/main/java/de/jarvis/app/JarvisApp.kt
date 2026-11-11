@@ -36,6 +36,8 @@ data class Entry(val fromUser: Boolean, val text: String, val ok: Boolean = true
 class JarvisApp : Application() {
     val entries = MutableStateFlow(listOf<Entry>())
     val devices = MutableStateFlow(listOf<Device>())
+    /** Name des Hauptgeräts (verwaltet Kopplung, Sperren und Rechte). */
+    val adminName = MutableStateFlow<String?>(null)
     val paired = MutableStateFlow(false)
     /** Hinweis, solange die Kopplung nicht abgeschlossen ist. */
     val status = MutableStateFlow<String?>(null)
@@ -75,6 +77,7 @@ class JarvisApp : Application() {
             while (true) {
                 devices.value = jarvis?.devices()?.filterNot { it.thisDevice } ?: emptyList()
                 status.value = jarvis?.status()
+                adminName.value = jarvis?.members()?.firstOrNull { it.admin }?.name
                 delay(2000)
             }
         }

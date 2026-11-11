@@ -172,6 +172,42 @@ fn phone_uses_pc_brain_and_sends_files() {
     let r = pc_rt.block_on(pc.handle_text("Pause am Handy"));
     assert!(r.ok && r.text.ends_with("pause"), "{}", r.text);
 
+    // --- Hauptgerät und Rechte ---------------------------------------------
+    // Der PC hat Jarvis zuerst eingerichtet und ist Hauptgerät: das Handy darf
+    // ihn erst steuern, wenn er es ausdrücklich erlaubt.
+    let r = phone.ask("öffne Steam am Gaming-PC".into());
+    assert!(!r.ok && r.text.contains("Hauptgerät"), "{}", r.text);
+    pc.set_permissions("Handy", None, None, Some(true)).unwrap();
+    let r = phone.ask("öffne Steam am Gaming-PC".into());
+    assert!(!r.text.contains("darf"), "{}", r.text);
+    // Dateien schicken verbieten -> wird am PC abgelehnt.
+    pc.set_permissions("Handy", None, Some(false), None)
+        .unwrap();
+    let r = phone.send_file(
+        photo.to_string_lossy().into(),
+        "Gaming-PC".into(),
+        Some("Bilder".into()),
+    );
+    assert!(!r.ok && r.text.contains("keine Dateien"), "{}", r.text);
+    let _ = std::fs::remove_file(pictures.join(&photo_name));
+    // Das Handy selbst kann keine Rechte ändern oder Geräte aufnehmen.
+    let t = Instant::now();
+    loop {
+        let members = phone.members();
+        let me = members.iter().find(|m| m.this_device);
+        if members[0].name == "Gaming-PC"
+            && members[0].admin
+            && me.is_some_and(|m| m.control_main && !m.files && !m.admin)
+        {
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "Handy kennt die neuen Rechte nicht: {members:?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
     // --- Sicherheit ---------------------------------------------------------
     // Ein zweites Gerät mit demselben (schon verbrauchten) Code kommt nicht hinein.
     let thief_dir = tempfile::tempdir().unwrap();
@@ -215,5 +251,5 @@ fn phone_uses_pc_brain_and_sends_files() {
         phone.devices().iter().all(|d| d.name != "Gaming-PC"),
         "gesperrtes Handy hat sich wieder verbunden"
     );
-    assert!(pc.trusted_devices().iter().all(|(name, _)| name != "Handy"));
+    assert!(pc.trusted_devices().iter().all(|d| d.name != "Handy"));
 }

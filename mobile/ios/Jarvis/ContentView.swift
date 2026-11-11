@@ -130,7 +130,8 @@ struct ChatView: View {
                         .background(.thinMaterial, in: Capsule())
                 }
                 ForEach(model.devices, id: \.name) { device in
-                    Label(device.name, systemImage: icon(for: device.platform))
+                    Label(device.name == model.adminName ? "\(device.name) · Hauptgerät" : device.name,
+                          systemImage: icon(for: device.platform))
                         .font(.footnote).padding(8)
                         .background(.thinMaterial, in: Capsule())
                 }

@@ -41,6 +41,15 @@ fail=0
 check() { if eval "$2"; then echo "✔ $1"; else echo "✘ $1"; fail=1; fi; }
 
 ipad "$B/jarvis" geräte
+# --- Hauptgerät (der PC wurde zuerst eingerichtet) ---
+out=$(ipad "$B/jarvis" öffne Minecraft am PC || true); echo "$out"
+check "iPad darf das Hauptgerät erst nach Freigabe steuern" "grep -q 'Hauptgerät' <<<\"\$out\" && ! test -f '$W/pc/minecraft.log'"
+out=$(ipad "$B/jarvisd" pair 2>&1 || true)
+check "nur das Hauptgerät koppelt neue Geräte" "grep -q 'am Hauptgerät' <<<\"\$out\""
+out=$(ipad "$B/jarvisd" entfernen Gaming-PC 2>&1 || true)
+check "nur das Hauptgerät sperrt Geräte" "grep -q 'nur das Hauptgerät' <<<\"\$out\""
+pc "$B/jarvisd" rechte iPad --hauptgeraet ja
+pc "$B/jarvisd" geraete
 ipad "$B/jarvis" öffne Minecraft am PC
 sleep 0.3
 check "Minecraft am PC gestartet" "grep -q gestartet '$W/pc/minecraft.log'"
@@ -59,6 +68,9 @@ link2=$(pc "$B/jarvisd" pair | grep -o 'jarvis://pair?[^"]*')
 check "Kopplungscode enthält keinen geheimen Schlüssel" "! grep -q \"\$(grep '^private_key' '$W/pc/config.toml' | cut -d'\"' -f2)\" <<<\"\$link2\""
 out=$(printf 'POST / HTTP/1.1\r\nHost: x\r\n\r\n{"cmd":"text","text":"öffne Minecraft"}\n' | timeout 3 bash -c 'exec 3<>/dev/tcp/127.0.0.1/7878; cat >&3; cat <&3' 2>/dev/null || true)
 check "Browser-Anfrage an die Steuerung wird abgewiesen" "grep -q 'Zugang verweigert' <<<\"\$out\""
+pc "$B/jarvisd" rechte iPad --dateien nein >/dev/null
+out=$(ipad "$B/jarvis" sende Datei a an den PC in Ordner Dokumente || true); echo "$out"
+check "Dateien schicken lässt sich verbieten" "grep -q 'keine Dateien' <<<\"\$out\" && ! test -f '$W/pc/Documents/a (2).txt'"
 pc "$B/jarvisd" entfernen iPad
 sleep 1
 check "gesperrtes iPad ist getrennt" "! ipad '$B/jarvis' geräte | grep -q Gaming-PC"

@@ -64,18 +64,21 @@ Zertifikat signiert ist: *Weitere Informationen › Trotzdem ausführen*.
 git clone https://github.com/sparkyy87-a11y/Jarvis.git && cd Jarvis
 cargo build --release          # Programme liegen danach in target/release/
 
-# Erstes Gerät (z. B. der PC)
-jarvisd init --name Gaming-PC
+# Erstes Gerät = Hauptgerät (das Gerät, das DU benutzt, z. B. dein Laptop)
+jarvisd init --name Laptop
 jarvisd autostart an           # Dienst starten (und bei jeder Anmeldung)
 jarvisd pair                   # QR-Code + Einmal-Code für das nächste Gerät
 
-# Weiterer PC/Laptop: den Befehl aus `jarvisd pair` ausführen
-jarvisd join "jarvis://pair?…" --name Laptop
+# Weiterer PC: den Befehl aus `jarvisd pair` ausführen
+jarvisd join "jarvis://pair?…" --name PC
 jarvisd autostart an
 # Handy/Tablet: QR-Code mit der Kamera scannen, Namen eingeben, bestätigen
 
-jarvisd geraete                # alle gekoppelten Geräte
-jarvisd entfernen Handy        # verlorenes Gerät sperren
+jarvisd geraete                # alle gekoppelten Geräte mit Rolle und Rechten
+jarvisd entfernen Handy        # verlorenes Gerät sperren            (nur Hauptgerät)
+jarvisd rechte PC --steuern nein --dateien nein                   # (nur Hauptgerät)
+jarvisd rechte iPhone --hauptgeraet ja   # iPhone darf auch den Laptop steuern
+jarvisd hauptgeraet iPad       # Hauptrolle abgeben                  (nur Hauptgerät)
 
 # Befehle geben (auf jedem Gerät)
 jarvis geräte
@@ -363,6 +366,22 @@ Wohnzimmer" und „iPad Büro" nennen.
 
 ## Sicherheit
 
+**Hauptgerät und Rechte**
+- Das zuerst eingerichtete Gerät ist das **Hauptgerät**. Nur dort werden neue
+  Geräte gekoppelt, Geräte gesperrt, Rechte vergeben und die Hauptrolle
+  weitergegeben (`jarvisd hauptgeraet <Gerät>` oder Einstellungen › Geräte).
+- Die Geräteliste mit allen Rechten ist vom Hauptgerät **digital signiert**
+  (Ed25519). Jedes Gerät merkt sich beim Koppeln den Signaturschlüssel aus dem
+  QR-Code und übernimmt nur Listen, die damit unterschrieben und neuer sind.
+  Ein anderes Gerät kann sich also keine Rechte geben – auch nicht, indem
+  jemand an dessen Dateien herumändert.
+- Rechte je Gerät: *andere Geräte steuern*, *das Hauptgerät steuern* (standard-
+  mäßig aus – für deine eigenen Geräte einschalten), *Dateien schicken*.
+  Geprüft wird auf dem Gerät, das den Befehl bekommt.
+- Grenze: Auf seinem eigenen Rechner hat dessen Benutzer weiter die volle
+  Kontrolle (er kann Jarvis dort beenden oder deinstallieren). Andere Geräte
+  steuern kann er nur, soweit das Hauptgerät es erlaubt.
+
 **Geräte und Kopplung**
 - Jedes Gerät hat ein **eigenes Schlüsselpaar** (X25519). Verbindungen laufen über
   Noise `XX` mit ChaCha20-Poly1305: beide Seiten beweisen ihren Schlüssel, alles
@@ -394,8 +413,9 @@ Wohnzimmer" und „iPad Büro" nennen.
   warnt, bevor eine empfangene `.exe` startet.
 
 **Bewusste Grenzen**
-- Ein gekoppeltes Gerät darf auf den anderen Apps öffnen, Musik steuern und
-  Dateien in deine Ordner legen – dafür ist Jarvis da. Koppel nur eigene Geräte.
+- Ein gekoppeltes Gerät darf – soweit das Hauptgerät es erlaubt – auf den
+  anderen Apps öffnen, Musik steuern und Dateien in deine Ordner legen.
+  Koppel nur Geräte, denen du traust, und schränke die übrigen ein.
 - Jarvis lauscht im WLAN auf Port 7879. Windows fragt beim ersten Start nach der
   Firewall: nur **„Private Netzwerke"** erlauben.
 - Auf dem Handy liegt der Geräteschlüssel im privaten App-Speicher (geschützt

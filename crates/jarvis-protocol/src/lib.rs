@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Version des Drahtprotokolls. Wird im `Hello` ausgetauscht.
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 
 /// Größe eines Datei-Chunks. Muss zusammen mit dem Frame-Overhead unter die
 /// Noise-Grenze von 65 535 Byte pro Nachricht passen.
@@ -78,6 +78,9 @@ pub struct DeviceInfo {
     pub capabilities: Vec<Capability>,
     /// Port, auf dem das Gerät Verbindungen annimmt.
     pub port: u16,
+    /// Öffentlicher Signaturschlüssel (Ed25519, hex) – wird gebraucht, falls
+    /// dieses Gerät einmal Hauptgerät wird.
+    pub sign_key: String,
 }
 
 impl DeviceInfo {
@@ -232,17 +235,67 @@ pub struct Command {
     pub target: Target,
 }
 
-/// Ein vertrauenswürdiges Gerät: öffentlicher Schlüssel (hex), ID, Name.
+/// Zuletzt bekannte Adresse eines Geräts – nur ein Hinweis zum Verbinden
+/// (der Schlüssel wird beim Verbinden ohnehin geprüft).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrustEntry {
+pub struct AddrHint {
+    pub key: String,
+    pub addr: String,
+    /// Wann zuletzt bestätigt (Unix-Sekunden).
+    pub seen: u64,
+}
+
+/// Ein Gerät in der Richtlinie mit seinen Rechten.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Member {
+    /// Geräteschlüssel (X25519, hex) – damit weist es sich beim Verbinden aus.
     pub key: String,
     pub id: Uuid,
     pub name: String,
-    /// Zuletzt bekannte Adresse ("192.168.1.42:7879") – so finden sich Geräte
-    /// auch ohne PC (z. B. iPad und Android-Handy direkt).
-    pub addr: Option<String>,
-    /// Wann diese Adresse zuletzt bestätigt wurde (Unix-Sekunden).
-    pub seen: u64,
+    /// Signaturschlüssel (Ed25519, hex) – falls es Hauptgerät wird.
+    pub sign_key: String,
+    /// Darf andere Geräte steuern (Apps, Musik, Suche, Vorlesen …).
+    pub control: bool,
+    /// Darf Dateien an andere Geräte schicken.
+    pub files: bool,
+    /// Darf auch das Hauptgerät steuern (für deine eigenen Geräte).
+    #[serde(default)]
+    pub control_main: bool,
+}
+
+/// Wer dazugehört und was jeder darf – vom Hauptgerät signiert.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Policy {
+    /// Steigt mit jeder Änderung; ältere Fassungen werden nie übernommen.
+    pub version: u64,
+    /// Das Hauptgerät: darf alles, wird nur von sich selbst gesteuert.
+    pub admin: Member,
+    pub members: Vec<Member>,
+    /// Gesperrte Geräteschlüssel.
+    pub revoked: Vec<String>,
+}
+
+impl Policy {
+    /// Eindeutige Bytes zum Signieren.
+    pub fn signing_bytes(&self) -> Vec<u8> {
+        let mut bytes = b"jarvis-policy-v1".to_vec();
+        bytes.extend(postcard::to_stdvec(self).unwrap_or_default());
+        bytes
+    }
+
+    pub fn member(&self, key: &str) -> Option<&Member> {
+        if self.admin.key == key {
+            return Some(&self.admin);
+        }
+        self.members.iter().find(|m| m.key == key)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignedPolicy {
+    pub policy: Policy,
+    /// Ed25519-Signatur des Hauptgeräts über `policy.signing_bytes()` (hex).
+    pub signature: String,
 }
 
 /// Eine Nachricht zwischen zwei verbundenen Geräten.
@@ -253,8 +306,8 @@ pub enum Frame {
     Hello {
         version: u16,
         device: DeviceInfo,
-        trusted: Vec<TrustEntry>,
-        revoked: Vec<String>,
+        policy: Option<SignedPolicy>,
+        addrs: Vec<AddrHint>,
     },
     /// Neues Gerät stellt sich mit dem Einmal-Code aus `jarvisd pair` vor.
     PairRequest {
@@ -265,14 +318,11 @@ pub enum Frame {
         ok: bool,
         message: String,
     },
-    /// Gerät mit diesem Schlüssel ist gesperrt (verloren, verkauft …).
-    Revoke {
-        key: String,
-    },
-    /// Geänderte Vertrauensliste (neues Gerät, neue Adresse) – an alle Verbundenen.
+    /// Neue Richtlinie (neues Gerät, Rechte, Sperre) und/oder neue Adressen –
+    /// an alle Verbundenen weitergegeben.
     Sync {
-        trusted: Vec<TrustEntry>,
-        revoked: Vec<String>,
+        policy: Option<SignedPolicy>,
+        addrs: Vec<AddrHint>,
     },
     Execute {
         id: Uuid,

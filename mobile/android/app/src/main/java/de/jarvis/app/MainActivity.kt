@@ -265,6 +265,7 @@ class MainActivity : ComponentActivity() {
     private fun Chat() {
         val entries by app.entries.collectAsState()
         val devices by app.devices.collectAsState()
+        val adminName by app.adminName.collectAsState()
         val isListening by listening.collectAsState()
         val orbState by app.orb.collectAsState()
         val pairingStatus by app.status.collectAsState()
@@ -308,7 +309,8 @@ class MainActivity : ComponentActivity() {
                     AssistChip(onClick = {}, label = { Text(pairingStatus ?: "Suche deine Geräte …") })
                 }
                 devices.forEach { d ->
-                    AssistChip(onClick = {}, label = { Text(d.name) }, modifier = Modifier.padding(end = 8.dp))
+                    val label = if (d.name == adminName) "${d.name} · Hauptgerät" else d.name
+                    AssistChip(onClick = {}, label = { Text(label) }, modifier = Modifier.padding(end = 8.dp))
                 }
             }
             Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {

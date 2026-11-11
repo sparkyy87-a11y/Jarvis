@@ -113,6 +113,10 @@ pub struct DeviceSection {
     /// Eigener Geräteschlüssel (X25519, hex). Geheim – nie weitergeben.
     pub private_key: String,
     pub public_key: String,
+    /// Eigener Signaturschlüssel (Ed25519, hex) – damit unterschreibt das
+    /// Hauptgerät die Geräteliste. Geheim – nie weitergeben.
+    #[serde(default)]
+    pub signing_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,7 +229,13 @@ impl Config {
         let mut cfg: Config =
             toml::from_str(&text).with_context(|| format!("{} ist ungültig", path.display()))?;
         cfg.identity()?;
-        cfg.source = Some(path);
+        cfg.source = Some(path.clone());
+        if cfg.device.signing_key.is_empty() {
+            // Ältere Einrichtung: Signaturschlüssel nachrüsten.
+            cfg.device.signing_key = crate::trust::new_signing_key();
+            cfg.save_to(&path)?;
+        }
+        cfg.sign_public()?;
         Ok(cfg)
     }
 
@@ -274,6 +284,7 @@ impl Config {
                 platform: None,
                 private_key: hex::encode(id.private),
                 public_key: id.public_hex(),
+                signing_key: crate::trust::new_signing_key(),
             },
             mesh: MeshSection {
                 port: DEFAULT_MESH_PORT,
@@ -302,6 +313,12 @@ impl Config {
             private: key(&self.device.private_key, "private_key")?,
             public: key(&self.device.public_key, "public_key")?,
         })
+    }
+
+    /// Öffentlicher Signaturschlüssel (hex).
+    pub fn sign_public(&self) -> Result<String> {
+        crate::trust::public_sign_key(&self.device.signing_key)
+            .context("signing_key in der Konfiguration ist ungültig")
     }
 
     pub fn platform(&self) -> Platform {

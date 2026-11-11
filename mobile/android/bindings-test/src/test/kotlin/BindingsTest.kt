@@ -89,6 +89,9 @@ class BindingsTest {
             val r = phone.ask("öffne Spotify")
             assertTrue(r.ok, r.text)
             assertEquals(null, phone.status(), "Kopplung abgeschlossen")
+            val admin = phone.members().first()
+            assertTrue(admin.admin && admin.name == "Gaming-PC", "Hauptgerät: $admin")
+            assertFalse(phone.members().single { it.thisDevice }.controlMain, "Hauptgerät nur nach Freigabe steuerbar")
             assertEquals(listOf("Spotify"), bridge.opened.toList())
 
             // Google-Suche und Musik laufen über die Kotlin-Brücke

@@ -26,7 +26,7 @@ use crate::events::{describe, HudEvent};
 use crate::files;
 use crate::host::{DesktopHost, Host};
 use crate::transport::{Identity, SecureConn};
-use crate::trust::{Joining, TrustStore};
+use crate::trust::{member_from, Joining, Permission, TrustStore};
 
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -66,6 +66,22 @@ impl Reply {
     }
 }
 
+/// Ein gekoppeltes Gerät mit Rolle und Rechten.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MemberStatus {
+    pub name: String,
+    pub online: bool,
+    pub this_device: bool,
+    /// Hauptgerät: darf koppeln, sperren, Rechte vergeben.
+    pub admin: bool,
+    /// Darf andere Geräte steuern.
+    pub control: bool,
+    /// Darf Dateien an andere Geräte schicken.
+    pub files: bool,
+    /// Darf auch das Hauptgerät steuern.
+    pub control_main: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceStatus {
     pub name: String,
@@ -101,6 +117,7 @@ struct Interpreted {
     reply: String,
 }
 
+#[allow(clippy::large_enum_variant)] // kurzlebig, nur auf dem Stack
 enum Resolved {
     Here,
     Remote(Peer),
@@ -124,6 +141,7 @@ impl Node {
             aliases: cfg.device.aliases.clone(),
             capabilities: capabilities_for(cfg.platform()),
             port: cfg.mesh.port,
+            sign_key: cfg.sign_public()?,
         };
         let brain = match cfg.brain.backend() {
             Ok(Some(backend)) => {
@@ -140,10 +158,21 @@ impl Node {
             me.capabilities.push(Capability::Brain);
         }
         let trust_path = cfg.trust_path();
+        let identity = cfg.identity()?;
+        let mut trust = TrustStore::load(&trust_path)?;
+        if trust.policy.is_none() && trust.joining.is_none() && trust.pinned.is_none() {
+            // Erstes Gerät (nicht per Code beigetreten): wird Hauptgerät.
+            trust.init_admin(
+                member_from(&identity.public_hex(), &me, true, true),
+                &cfg.device.signing_key,
+            )?;
+            trust.save(&trust_path)?;
+            info!("{} ist das Hauptgerät", me.name);
+        }
         Ok(Arc::new(Self {
             me,
-            identity: cfg.identity()?,
-            trust: Mutex::new(TrustStore::load(&trust_path)?),
+            identity,
+            trust: Mutex::new(trust),
             trust_path,
             pairing_problem: Mutex::default(),
             cfg,
@@ -261,30 +290,38 @@ impl Node {
         if self.trust.lock().unwrap().is_revoked(&key) {
             bail!("gesperrtes Gerät ({addr}) abgewiesen");
         }
-        let known = self.trust.lock().unwrap().is_trusted(&key);
-        if !known {
-            self.pair_unknown(&mut conn, &key, initiated_by_me, addr)
+        // Unbekanntes Gerät: koppeln (mit Einmal-Code) – oder es bringt eine
+        // vom Hauptgerät signierte Liste mit, in der es steht (z. B. ein Gerät,
+        // das gerade erst gekoppelt wurde und uns zuerst erreicht).
+        let mut early_hello = None;
+        if !self.trust.lock().unwrap().is_trusted(&key) {
+            early_hello = self
+                .pair_unknown(&mut conn, &key, initiated_by_me, addr)
                 .await?;
         }
 
-        let (trusted, revoked) = {
+        let (policy, addrs) = {
             let t = self.trust.lock().unwrap();
-            (t.entries(), t.revoked_keys())
+            (t.policy.clone(), t.addr_hints())
         };
         conn.send(&Frame::Hello {
             version: PROTOCOL_VERSION,
             device: self.me.clone(),
-            trusted,
-            revoked,
+            policy,
+            addrs,
         })
         .await?;
-        let (info, their_trusted, their_revoked) = match conn.recv().await? {
+        let hello = match early_hello {
+            Some(h) => Some(h),
+            None => conn.recv().await?,
+        };
+        let (info, their_policy, their_addrs) = match hello {
             Some(Frame::Hello {
                 version,
                 device,
-                trusted,
-                revoked,
-            }) if version == PROTOCOL_VERSION => (device, trusted, revoked),
+                policy,
+                addrs,
+            }) if version == PROTOCOL_VERSION => (device, policy, addrs),
             Some(Frame::Hello { version, .. }) => {
                 bail!("Gerät spricht Protokoll v{version}, wir v{PROTOCOL_VERSION} – bitte alle Geräte aktualisieren")
             }
@@ -293,22 +330,28 @@ impl Node {
         if info.id == self.me.id {
             bail!("Verbindung zu mir selbst");
         }
-        // Listen abgleichen: was das Gegenüber kennt bzw. gesperrt hat, übernehmen.
-        let (newly_revoked, changed) = {
+        // Neuere, vom Hauptgerät signierte Liste übernehmen; Adressen abgleichen.
+        let (policy_changed, addrs_changed) = {
             let mut t = self.trust.lock().unwrap();
-            let before = t.entries();
-            t.add(&key, info.id, &info.name);
+            let policy_changed = match their_policy.as_ref().map(|p| t.accept(p)) {
+                Some(Ok(changed)) => changed,
+                Some(Err(e)) => {
+                    warn!("Geräteliste von {} verworfen: {e:#}", info.name);
+                    false
+                }
+                None => false,
+            };
+            if !t.is_trusted(&key) {
+                bail!("{} ({addr}) gehört nicht (mehr) dazu", info.name);
+            }
             // Adresse merken, unter der das Gerät Verbindungen annimmt.
             t.observe(&key, SocketAddr::new(addr.ip(), info.port).to_string());
-            let own = self.identity.public_hex();
-            let newly = t.merge(&own, &their_trusted, &their_revoked);
+            let addrs_changed = t.merge_addrs(&self.identity.public_hex(), &their_addrs);
             let _ = t.save(&self.trust_path);
-            let changed = t.entries() != before || !newly.is_empty();
-            (newly, changed)
+            (policy_changed, addrs_changed)
         };
-        self.disconnect_keys(&newly_revoked);
-        if newly_revoked.contains(&key) {
-            bail!("{} ist gesperrt", info.name);
+        if policy_changed {
+            self.drop_untrusted();
         }
         if let Some(a) = static_addr {
             self.static_links.lock().unwrap().insert(a, info.id);
@@ -330,7 +373,7 @@ impl Node {
             return Ok(());
         }
         info!("Verbunden mit {} ({:?}, {addr})", info.name, info.platform);
-        if changed {
+        if policy_changed || addrs_changed {
             self.broadcast_trust(Some(&key));
         }
 
@@ -343,7 +386,7 @@ impl Node {
                         Some(f) => {
                             // Direkte Antworten gehen sofort raus, nicht über `tx`:
                             // sonst könnte die eigene Warteschlange uns blockieren.
-                            if let Some(answer) = self.clone().on_frame(f, &tx, &mut incoming, &info.name).await {
+                            if let Some(answer) = self.clone().on_frame(f, &tx, &mut incoming, &info.name, &key).await {
                                 conn.send(&answer).await?;
                             }
                         }
@@ -369,19 +412,22 @@ impl Node {
         result
     }
 
-    /// Unbekanntes Gerät: nur mit gültigem Einmal-Code hinein (bzw. hinaus, wenn
-    /// wir selbst gerade koppeln und das Gegenüber den erwarteten Schlüssel hat).
+    /// Unbekanntes Gerät: nur mit gültigem Einmal-Code des Hauptgeräts hinein
+    /// (bzw. hinaus, wenn wir selbst gerade koppeln und das Gegenüber den
+    /// erwarteten Schlüssel hat). Schickt das Gegenüber gleich sein Hello, wird
+    /// es zurückgegeben – ob es dazugehört, entscheidet dann dessen signierte Liste.
     async fn pair_unknown(
         &self,
         conn: &mut SecureConn,
         key: &str,
         initiated_by_me: bool,
         addr: SocketAddr,
-    ) -> Result<()> {
+    ) -> Result<Option<Frame>> {
         if initiated_by_me {
             let joining: Option<Joining> = self.trust.lock().unwrap().joining.clone();
             let Some(j) = joining.filter(|j| j.key == key) else {
-                bail!("unbekanntes Gerät unter {addr} – nicht gekoppelt");
+                // Vielleicht steht es in einer neueren Liste, die es uns gleich schickt.
+                return Ok(None);
             };
             conn.send(&Frame::PairRequest {
                 token: j.token.clone(),
@@ -392,10 +438,13 @@ impl Node {
                 Some(Frame::PairResult { ok: true, .. }) => {
                     let mut t = self.trust.lock().unwrap();
                     t.joining = None;
+                    // Ab jetzt gilt nur, was dieses Hauptgerät unterschreibt.
+                    t.pinned = Some(j.sign_key.clone());
+                    t.policy = None;
                     t.save(&self.trust_path)?;
                     *self.pairing_problem.lock().unwrap() = None;
                     info!("Gekoppelt mit {}", j.name);
-                    Ok(())
+                    Ok(None)
                 }
                 Some(Frame::PairResult { ok: false, message }) => {
                     *self.pairing_problem.lock().unwrap() = Some(message.clone());
@@ -405,26 +454,36 @@ impl Node {
             }
         } else {
             let request = tokio::time::timeout(Duration::from_secs(10), conn.recv()).await;
-            let Ok(Ok(Some(Frame::PairRequest { token, device }))) = request else {
-                bail!("unbekanntes Gerät von {addr} abgewiesen");
+            let (token, device) = match request {
+                Ok(Ok(Some(Frame::PairRequest { token, device }))) => (token, device),
+                Ok(Ok(Some(hello @ Frame::Hello { .. }))) => return Ok(Some(hello)),
+                _ => bail!("unbekanntes Gerät von {addr} abgewiesen"),
             };
-            let accepted = {
+            let accepted: Result<()> = {
                 let mut t = self.trust.lock().unwrap();
-                let ok = t.take_invite(&token) && t.add(key, device.id, &device.name);
-                if ok {
-                    t.save(&self.trust_path)?;
+                if !t.take_invite(&token) {
+                    Err(anyhow!(
+                        "Kopplungscode ungültig oder abgelaufen – am Hauptgerät einen neuen Code anzeigen."
+                    ))
+                } else {
+                    let member = member_from(key, &device, true, true);
+                    t.edit(&self.cfg.device.signing_key, |p| {
+                        p.members.retain(|m| m.key != member.key);
+                        p.members.push(member);
+                        Ok(())
+                    })
+                    .and_then(|_| t.save(&self.trust_path))
                 }
-                ok
             };
-            if !accepted {
+            if let Err(e) = accepted {
                 let _ = conn
                     .send(&Frame::PairResult {
                         ok: false,
-                        message: "Kopplungscode ungültig oder abgelaufen – am PC neu `jarvisd pair` ausführen.".into(),
+                        message: format!("{e:#}"),
                     })
                     .await;
-                warn!("Kopplungsversuch von {addr} mit ungültigem Code abgewiesen");
-                bail!("ungültiger Kopplungscode");
+                warn!("Kopplungsversuch von {addr} abgewiesen: {e:#}");
+                bail!("Kopplung abgewiesen");
             }
             conn.send(&Frame::PairResult {
                 ok: true,
@@ -436,25 +495,40 @@ impl Node {
                 text: format!("Neues Gerät gekoppelt: {}", device.name),
                 ok: true,
             });
-            Ok(())
+            Ok(None)
         }
     }
 
-    /// Schickt die aktuelle Vertrauensliste an alle verbundenen Geräte
+    /// Schickt die aktuelle Geräteliste und Adressen an alle verbundenen Geräte
     /// (außer `except`, das sie gerade im Hello bekommen hat).
     fn broadcast_trust(&self, except: Option<&str>) {
-        let (trusted, revoked) = {
+        let (policy, addrs) = {
             let t = self.trust.lock().unwrap();
-            (t.entries(), t.revoked_keys())
+            (t.policy.clone(), t.addr_hints())
         };
         for p in self.peers.lock().unwrap().values() {
             if Some(p.key.as_str()) != except {
                 let _ = p.tx.try_send(Frame::Sync {
-                    trusted: trusted.clone(),
-                    revoked: revoked.clone(),
+                    policy: policy.clone(),
+                    addrs: addrs.clone(),
                 });
             }
         }
+    }
+
+    /// Trennt Verbindungen zu Geräten, die laut Liste nicht (mehr) dazugehören.
+    fn drop_untrusted(&self) {
+        let keys: Vec<String> = {
+            let t = self.trust.lock().unwrap();
+            self.peers
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|p| !t.is_trusted(&p.key))
+                .map(|p| p.key.clone())
+                .collect()
+        };
+        self.disconnect_keys(&keys);
     }
 
     /// Trennt Verbindungen zu (gerade gesperrten) Schlüsseln.
@@ -473,42 +547,135 @@ impl Node {
     }
 
     /// Neuer Einmal-Code; liefert den Kopplungslink für QR-Code bzw. App.
+    /// Nur das Hauptgerät kann Geräte aufnehmen.
     pub fn create_invite(&self, addrs: Option<Vec<String>>) -> Result<String> {
         let mut t = self.trust.lock().unwrap();
+        if !t.is_admin(&self.me.sign_key) {
+            bail!(
+                "Neue Geräte koppelst du am Hauptgerät ({}).",
+                t.admin_name().unwrap_or_else(|| "unbekannt".into())
+            );
+        }
         let invite = t.new_invite();
         t.save(&self.trust_path)?;
         Ok(crate::pairing::link_for(&self.cfg, &invite.token, addrs))
     }
 
-    /// Sperrt ein Gerät dauerhaft und gibt die Sperre an alle anderen weiter.
-    pub async fn revoke(&self, name: &str) -> Result<String> {
-        let wanted = name.trim().to_lowercase();
-        let (key, shown) = {
+    /// Ändert die signierte Geräteliste (nur am Hauptgerät) und verteilt sie.
+    fn edit_policy(
+        &self,
+        change: impl FnOnce(&mut jarvis_protocol::Policy) -> Result<()>,
+    ) -> Result<()> {
+        {
             let mut t = self.trust.lock().unwrap();
-            let Some((key, d)) = t
-                .devices
-                .iter()
-                .find(|(_, d)| d.name.to_lowercase() == wanted)
-                .map(|(k, d)| (k.clone(), d.clone()))
-            else {
-                bail!("Kein gekoppeltes Gerät heißt „{name}“.");
-            };
-            t.revoke(&key);
+            t.edit(&self.cfg.device.signing_key, change)?;
             t.save(&self.trust_path)?;
-            (key, d.name)
-        };
-        self.disconnect_keys(std::slice::from_ref(&key));
-        let others: Vec<Peer> = self.peers.lock().unwrap().values().cloned().collect();
-        for p in others {
-            let _ = p.tx.send(Frame::Revoke { key: key.clone() }).await;
         }
+        self.drop_untrusted();
+        self.broadcast_trust(None);
+        Ok(())
+    }
+
+    /// Schlüssel eines gekoppelten Geräts (ohne dieses) nach Name.
+    fn member_key(&self, name: &str) -> Result<(String, String)> {
+        let wanted = name.trim().to_lowercase();
+        let t = self.trust.lock().unwrap();
+        let p = t.policy().context("Noch nicht gekoppelt.")?;
+        std::iter::once(&p.admin)
+            .chain(&p.members)
+            .find(|m| m.name.to_lowercase() == wanted)
+            .map(|m| (m.key.clone(), m.name.clone()))
+            .with_context(|| format!("Kein gekoppeltes Gerät heißt „{name}“."))
+    }
+
+    /// Sperrt ein Gerät dauerhaft; die Sperre verteilt sich an alle anderen.
+    pub async fn revoke(&self, name: &str) -> Result<String> {
+        let (key, shown) = self.member_key(name)?;
+        if key == self.public_key() {
+            bail!("Das Hauptgerät kann sich nicht selbst sperren.");
+        }
+        self.edit_policy(|p| {
+            p.members.retain(|m| m.key != key);
+            p.revoked.push(key.clone());
+            Ok(())
+        })?;
         Ok(format!(
             "{shown} ist gesperrt und kann sich nicht mehr verbinden."
         ))
     }
 
-    /// Alle gekoppelten Geräte (auch offline), Name -> verbunden?
-    pub fn trusted_devices(&self) -> Vec<(String, bool)> {
+    /// Rechte eines Geräts ändern (nur am Hauptgerät).
+    pub fn set_permissions(
+        &self,
+        name: &str,
+        control: Option<bool>,
+        files: Option<bool>,
+        control_main: Option<bool>,
+    ) -> Result<String> {
+        let (key, shown) = self.member_key(name)?;
+        if key == self.public_key() {
+            bail!("Das Hauptgerät darf immer alles.");
+        }
+        let mut now = (false, false, false);
+        self.edit_policy(|p| {
+            let m = p
+                .members
+                .iter_mut()
+                .find(|m| m.key == key)
+                .context("Gerät nicht gefunden")?;
+            m.control = control.unwrap_or(m.control);
+            m.files = files.unwrap_or(m.files);
+            m.control_main = control_main.unwrap_or(m.control_main);
+            now = (m.control, m.files, m.control_main);
+            Ok(())
+        })?;
+        let yes = |b: bool| if b { "ja" } else { "nein" };
+        Ok(format!(
+            "{shown}: andere Geräte steuern: {}, Hauptgerät steuern: {}, Dateien schicken: {}.",
+            yes(now.0),
+            yes(now.2),
+            yes(now.1)
+        ))
+    }
+
+    /// Gibt die Hauptrolle an ein anderes Gerät ab. Danach kann nur noch dieses
+    /// Gerät koppeln, sperren und Rechte vergeben.
+    pub fn make_admin(&self, name: &str) -> Result<String> {
+        let (key, shown) = self.member_key(name)?;
+        if key == self.public_key() {
+            bail!("{shown} ist schon das Hauptgerät.");
+        }
+        self.edit_policy(|p| {
+            let pos = p
+                .members
+                .iter()
+                .position(|m| m.key == key)
+                .context("Gerät nicht gefunden")?;
+            let mut new_admin = p.members.remove(pos);
+            if new_admin.sign_key.len() != 64 {
+                bail!("{shown} hat eine zu alte Jarvis-Version – bitte erst aktualisieren.");
+            }
+            new_admin.control = true;
+            new_admin.files = true;
+            new_admin.control_main = true;
+            let old = std::mem::replace(&mut p.admin, new_admin);
+            p.members.push(old);
+            Ok(())
+        })?;
+        Ok(format!("{shown} ist jetzt das Hauptgerät."))
+    }
+
+    /// Ist dieses Gerät das Hauptgerät?
+    pub fn is_admin(&self) -> bool {
+        self.trust.lock().unwrap().is_admin(&self.me.sign_key)
+    }
+
+    pub fn admin_name(&self) -> Option<String> {
+        self.trust.lock().unwrap().admin_name()
+    }
+
+    /// Alle gekoppelten Geräte (auch offline) mit Rolle und Rechten.
+    pub fn trusted_devices(&self) -> Vec<MemberStatus> {
         let connected: Vec<String> = self
             .peers
             .lock()
@@ -516,15 +683,22 @@ impl Node {
             .values()
             .map(|p| p.key.clone())
             .collect();
-        let mut list: Vec<(String, bool)> = self
-            .trust
-            .lock()
-            .unwrap()
-            .devices
-            .iter()
-            .map(|(k, d)| (d.name.clone(), connected.contains(k)))
+        let me = self.public_key();
+        let t = self.trust.lock().unwrap();
+        let Some(p) = t.policy() else { return vec![] };
+        let mut list: Vec<MemberStatus> = std::iter::once(&p.admin)
+            .chain(&p.members)
+            .map(|m| MemberStatus {
+                name: m.name.clone(),
+                online: connected.contains(&m.key),
+                this_device: m.key == me,
+                admin: m.key == p.admin.key,
+                control: m.control || m.key == p.admin.key,
+                files: m.files || m.key == p.admin.key,
+                control_main: m.control_main || m.key == p.admin.key,
+            })
             .collect();
-        list.sort();
+        list.sort_by(|a, b| b.admin.cmp(&a.admin).then(a.name.cmp(&b.name)));
         list
     }
 
@@ -567,7 +741,15 @@ impl Node {
         tx: &mpsc::Sender<Frame>,
         incoming: &mut HashMap<Uuid, Incoming>,
         from: &str,
+        from_key: &str,
     ) -> Option<Frame> {
+        let denied = |what: Permission| {
+            self.trust
+                .lock()
+                .unwrap()
+                .allows(from_key, &self.identity.public_hex(), what)
+                .err()
+        };
         let fail = |id, e: anyhow::Error| {
             Some(Frame::Outcome {
                 id,
@@ -581,34 +763,29 @@ impl Node {
             | Frame::Hello { .. }
             | Frame::PairRequest { .. }
             | Frame::PairResult { .. } => None,
-            Frame::Sync { trusted, revoked } => {
-                let (newly, changed) = {
+            Frame::Sync { policy, addrs } => {
+                let (policy_changed, addrs_changed) = {
                     let mut t = self.trust.lock().unwrap();
-                    let before = t.entries();
-                    let newly = t.merge(&self.identity.public_hex(), &trusted, &revoked);
-                    let changed = t.entries() != before || !newly.is_empty();
-                    if changed {
+                    let policy_changed = match policy.as_ref().map(|p| t.accept(p)) {
+                        Some(Ok(c)) => c,
+                        Some(Err(e)) => {
+                            warn!("Geräteliste von {from} verworfen: {e:#}");
+                            false
+                        }
+                        None => false,
+                    };
+                    let addrs_changed = t.merge_addrs(&self.identity.public_hex(), &addrs);
+                    if policy_changed || addrs_changed {
                         let _ = t.save(&self.trust_path);
                     }
-                    (newly, changed)
+                    (policy_changed, addrs_changed)
                 };
-                self.disconnect_keys(&newly);
-                if changed {
+                if policy_changed {
+                    self.drop_untrusted();
+                }
+                if policy_changed || addrs_changed {
                     // Weitergeben – nur bei echter Änderung, damit nichts endlos kreist.
                     self.broadcast_trust(None);
-                }
-                None
-            }
-            Frame::Revoke { key } => {
-                if key != self.identity.public_hex() {
-                    let name = {
-                        let mut t = self.trust.lock().unwrap();
-                        let name = t.revoke(&key);
-                        let _ = t.save(&self.trust_path);
-                        name
-                    };
-                    warn!("{from} hat {} gesperrt", name.unwrap_or_default());
-                    self.disconnect_keys(std::slice::from_ref(&key));
                 }
                 None
             }
@@ -651,6 +828,14 @@ impl Node {
                 None
             }
             Frame::Execute { id, action } => {
+                if let Some(why) = denied(Permission::Control) {
+                    warn!("Befehl von {from} abgelehnt: {why}");
+                    return Some(Frame::Outcome {
+                        id,
+                        ok: false,
+                        message: why,
+                    });
+                }
                 let tx = tx.clone();
                 self.emit(HudEvent::Heard {
                     text: describe(&action),
@@ -680,12 +865,20 @@ impl Node {
                 name,
                 size,
                 folder,
-            } => match Incoming::start(&name, size, self.host.receive_dir(folder.as_ref())).await {
-                Ok(inc) => {
-                    incoming.insert(id, inc);
-                    None
+            } => match denied(Permission::Files) {
+                Some(why) => {
+                    warn!("Datei von {from} abgelehnt: {why}");
+                    fail(id, anyhow!(why))
                 }
-                Err(e) => fail(id, e),
+                None => match Incoming::start(&name, size, self.host.receive_dir(folder.as_ref()))
+                    .await
+                {
+                    Ok(inc) => {
+                        incoming.insert(id, inc);
+                        None
+                    }
+                    Err(e) => fail(id, e),
+                },
             },
             Frame::FileChunk { id, data } => {
                 let inc = incoming.get_mut(&id)?;
@@ -1029,6 +1222,12 @@ impl Node {
                     .await?
             }
             Action::PairDevice => {
+                if !self.is_admin() {
+                    bail!(
+                        "Neue Geräte koppelst du am Hauptgerät ({}).",
+                        self.admin_name().unwrap_or_else(|| "unbekannt".into())
+                    );
+                }
                 let host = self.host.clone();
                 tokio::task::spawn_blocking(move || host.show_pairing()).await?
             }

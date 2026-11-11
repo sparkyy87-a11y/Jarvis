@@ -30,7 +30,9 @@ pub trait Host: Send + Sync + 'static {
     fn media(&self, command: MediaCommand) -> Result<String>;
     /// QR-Code zum Koppeln eines neuen Geräts anzeigen.
     fn show_pairing(&self) -> Result<String> {
-        anyhow::bail!("Neue Geräte koppelst du am PC oder Laptop: „Jarvis, verbinde dich mit einem neuen Gerät“.")
+        anyhow::bail!(
+            "Neue Geräte koppelst du am Hauptgerät: „Jarvis, verbinde dich mit einem neuen Gerät“."
+        )
     }
 }
 

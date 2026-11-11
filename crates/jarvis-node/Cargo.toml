@@ -47,6 +47,7 @@ mdns-sd = "0.11"
 sysinfo = { version = "0.30", optional = true }
 gethostname = "0.5"
 qrcode = { version = "0.14", default-features = false }
+ed25519-dalek = "2"
 
 [dev-dependencies]
 tempfile = "3"
