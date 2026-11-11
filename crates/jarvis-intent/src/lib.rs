@@ -86,11 +86,15 @@ static SAY: Lazy = (
 );
 static SEND: Lazy = (
     OnceLock::new(),
-    r"(?i)^(?:sende|send|schicke|schick|übertrage|übertrag|kopiere|kopier|copy|transfer|teile|share)\s+(?:mir\s+)?(?:die\s+|das\s+|the\s+)?(?:datei\s+|file\s+)?(?P<rest>.+)$",
+    r"(?i)^(?:sende|sender|send|schicke|schick|übertrage|übertrag|kopiere|kopier|copy|transfer|teile|share)\s+(?:mir\s+)?(?:die\s+|das\s+|the\s+)?(?:datei\s+|file\s+)?(?P<rest>.+)$",
 );
 static INTO_FOLDER: Lazy = (
     OnceLock::new(),
     r"(?i)^(?P<file>.+?)\s+(?:in|im|ins|nach|into|to)\s+(?:den\s+|die\s+|das\s+|dem\s+|the\s+|my\s+)?(?:ordner\s+|folder\s+|verzeichnis\s+)?(?P<folder>.+)$",
+);
+static HYPHEN_NOUN: Lazy = (
+    OnceLock::new(),
+    r"(?i)\b(datei|ordner|verzeichnis|file|folder)-",
 );
 static OPEN_PREFIX: Lazy = (
     OnceLock::new(),
@@ -111,6 +115,8 @@ static CLOSE_SUFFIX: Lazy = (
 
 /// Entfernt Anrede, Höflichkeitsfloskeln am Anfang und Satzzeichen am Ende.
 fn normalize(text: &str) -> String {
+    // Spracherkennung schreibt gern „Datei-Bericht" oder „Ordner-Dokumente".
+    let text = re(&HYPHEN_NOUN).replace_all(text, "$1 ");
     let mut t = text
         .trim()
         .trim_end_matches(['.', '!', '?'])
@@ -301,6 +307,11 @@ mod tests {
         );
         assert_eq!(
             p("Jarvis, sende Datei a an den PC in meine Dokumente."),
+            expected
+        );
+        // So schreibt Whisper es gern:
+        assert_eq!(
+            p("Sende die Datei-a an den PC in den Ordner-Dokumenten."),
             expected
         );
     }

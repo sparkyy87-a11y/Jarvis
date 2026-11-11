@@ -20,12 +20,24 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Linux-Pakete (Mikrofon, Sprachtest)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev espeak-ng ffmpeg
+      - name: Whisper-Modelle zwischenspeichern
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/jarvis/models
+          key: whisper-small-q5_1-silero-v5.1.2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - name: Zwei Geräte Ende-zu-Ende
         if: runner.os == 'Linux'
         run: ./scripts/e2e.sh
+      - name: Sprache Ende-zu-Ende (Whisper auf CPU)
+        if: runner.os == 'Linux'
+        run: ./scripts/voice-e2e.sh
       - name: Release-Build
         run: cargo build --release
       - uses: actions/upload-artifact@v4
@@ -36,4 +48,6 @@ jobs:
             target/release/jarvis
             target/release/jarvisd.exe
             target/release/jarvis.exe
+            target/release/jarvis-listen
+            target/release/jarvis-listen.exe
           if-no-files-found: ignore

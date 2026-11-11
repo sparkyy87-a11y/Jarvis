@@ -26,7 +26,7 @@ Regeln einen Satz nicht verstehen.
 | Apps öffnen und schließen: Windows, macOS, Linux | ✅ |
 | Dateien senden, mit Prüfsumme, in bekannte Ordner | ✅ |
 | Sprachausgabe über die Systemstimme | ✅ |
-| Spracheingabe (Wake Word + Whisper lokal) | Phase 2 |
+| Spracheingabe: „Jarvis, …" + Whisper lokal, optional auf der Grafikkarte | ✅ |
 | Computer Use (Claude bedient den Bildschirm) | Phase 3 |
 | Apps für iOS, iPadOS, Android | Phase 4 |
 | Zugriff von unterwegs (Relay) | Phase 5 |
@@ -76,6 +76,49 @@ Schlüssel gesetzt, nimmt Jarvis automatisch Claude.
 **Windows:** Beim ersten Start fragt die Firewall nach Port 7879. Für das Heimnetz
 (privates Netzwerk) erlauben.
 
+## Spracheingabe
+
+`jarvis-listen` hört über das Mikrofon zu und reagiert auf „Jarvis":
+
+```text
+„Jarvis, öffne Minecraft."                    → sofort ausgeführt
+„Jarvis."  –  „Ja?"  –  „Sende Datei a an …"   → Befehl nach kurzer Pause
+„Wie war dein Tag?"                          → ignoriert (kein Weckwort)
+```
+
+Alles läuft lokal: Silero erkennt, *wann* gesprochen wird, Whisper schreibt mit,
+danach geht der Text an `jarvisd` wie bei der Tastatureingabe. Beim ersten Start
+werden die Modelle geladen (einmalig).
+
+| Gerät | Modell (Standard) | Erkennungszeit pro Befehl |
+|---|---|---|
+| mit NVIDIA-Grafikkarte (CUDA) | `large-v3-turbo-q5_0` (~550 MB) | Bruchteile einer Sekunde, sehr genau |
+| nur Prozessor | `small-q5_1` (~190 MB) | ca. 0,4–1 s auf einem 4-Kern-Rechner |
+
+```bash
+jarvis-listen                  # zuhören
+jarvis-listen --mikrofone      # Mikrofone anzeigen, dann in der Config wählen
+jarvis-listen --datei test.wav --trocken   # Aufnahme testen, nichts ausführen
+```
+
+### Windows mit NVIDIA-Grafikkarte
+
+Mit Grafikkarte ist die Erkennung schneller und genauer. Auf einer GTX 1080 Ti
+laufen Whisper (`large-v3-turbo`) und das lokale Sprachmodell (`qwen2.5:7b`)
+gleichzeitig im Grafikspeicher (11 GB).
+
+1. Visual Studio Build Tools mit „Desktopentwicklung mit C++"
+2. `winget install Kitware.CMake LLVM.LLVM`
+3. **CUDA Toolkit 12.x** – nicht 13, das unterstützt GTX-10xx-Karten nicht mehr
+4. Neues Terminal, dann im Jarvis-Ordner:
+
+```powershell
+.\scripts\build-windows.ps1     # baut mit CUDA für GTX 10xx; -CudaArch 86 für RTX 30xx
+ollama pull qwen2.5:7b          # klügeres lokales Modell, passt auf die 1080 Ti
+```
+
+In der Config dann `model = "qwen2.5:7b"` unter `[brain]` eintragen.
+
 ## Konfiguration
 
 `%APPDATA%\jarvis\config.toml` (Windows), `~/Library/Application Support/jarvis/config.toml`
@@ -96,6 +139,14 @@ mdns = true
 [apps]                             # eigene Kurzbefehle, haben Vorrang
 minecraft = 'C:\XboxGames\Minecraft Launcher\Content\Minecraft.exe'
 
+[voice]
+language = "de"
+wake_words = ["jarvis"]
+# input_device = "USB"             # Teil des Mikrofonnamens
+# model = "large-v3-turbo"         # Whisper-Modell
+speak_replies = true
+follow_up_seconds = 8              # so lange wartet Jarvis nach „Jarvis." auf den Befehl
+
 [brain]
 provider = "auto"                  # auto | ollama | claude | off
 # model = "qwen2.5:7b"             # Standard: qwen2.5:3b bzw. claude-opus-5-5
@@ -106,7 +157,7 @@ provider = "auto"                  # auto | ollama | claude | off
 
 ```text
                     ┌──────────────── jarvisd (pro Gerät) ────────────────┐
- Sprache / CLI ──►  │ control ──► jarvis-intent ──(nicht erkannt)──► brain │ ──► Ollama/Claude
+ jarvis-listen ─►  │ control ──► jarvis-intent ──(nicht erkannt)──► brain │ ──► Ollama/Claude
  (127.0.0.1:7878)   │                 │                                    │
                     │                 ▼                                    │
                     │            node::run ── hier? ──► exec / files       │
@@ -122,6 +173,7 @@ provider = "auto"                  # auto | ollama | claude | off
 | `jarvis-intent` | Regelbasierte Befehlserkennung DE/EN, inkl. Zielgerät („am PC", „aufs Handy") |
 | `jarvis-brain` | Sprachmodell für freie Sätze: Ollama (lokal) oder Claude, festes JSON-Schema |
 | `jarvis-node` | `jarvisd` und `jarvis`: Mesh, Routing, Ausführung, Dateiübertragung |
+| `jarvis-voice` | `jarvis-listen`: Mikrofon, Silero-VAD, Whisper, Weckwort |
 
 **Warum so schnell:** Die häufigen Befehle erkennt `jarvis-intent` per Regex in
 Mikrosekunden, ohne Netz. Die Geräte halten eine dauerhafte, verschlüsselte
@@ -146,11 +198,9 @@ Gattungsname („PC", „iPad", „Handy"). Passen zwei Geräte, fragt Jarvis na
 
 ## Fahrplan
 
-**Phase 2 – Sprache.** Wake Word („Jarvis") lokal (z. B. openWakeWord/Porcupine),
-danach Spracherkennung lokal mit Whisper (`whisper-rs`, Modell `small`/`turbo`,
-GPU wenn vorhanden), Ausgabe zunächst über die Systemstimme, später eine
-natürlichere Stimme. Das Sprachmodul spricht über die lokale Steuerschnittstelle
-mit `jarvisd`, wie heute die CLI.
+**Phase 2 – Sprache (erledigt).** Als Nächstes: Jarvis startet automatisch mit
+Windows, eine natürlichere Stimme für die Antworten, und Whisper-Halluzinationen
+weiter zähmen.
 
 **Phase 3 – Computer Use.** Für Aufgaben ohne festen Befehl („trag den Termin in
 meinen Kalender ein"): Bildschirmfotos (`xcap`), Maus/Tastatur (`enigo`) und
@@ -174,4 +224,5 @@ damit „schick die Datei an den PC" auch aus dem Mobilfunknetz geht.
 cargo test                 # Unit-Tests
 cargo clippy --all-targets
 ./scripts/e2e.sh           # zwei Geräte lokal: Fernstart + Dateiübertragung
+./scripts/voice-e2e.sh     # dasselbe per Sprache (braucht espeak-ng, ffmpeg)
 ```

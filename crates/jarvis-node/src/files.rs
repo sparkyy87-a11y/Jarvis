@@ -33,26 +33,59 @@ pub fn locate(spoken: &str) -> Result<PathBuf> {
 
     let wanted_name = spoken.trim().to_lowercase();
     let wanted_stem = squash(spoken);
-    let found = walk(&roots, 4, &|p| {
-        let name = p
-            .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let stem = p
-            .file_stem()
+    let all = walk(&roots, 4, &|_| true);
+    let stem_of = |p: &PathBuf| {
+        p.file_stem()
             .map(|n| squash(&n.to_string_lossy()))
-            .unwrap_or_default();
-        name == wanted_name || stem == wanted_stem
-    });
-    let newest = found.into_iter().max_by_key(|p| {
-        p.metadata()
-            .and_then(|m| m.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH)
-    });
-    match newest {
+            .unwrap_or_default()
+    };
+    let name_of = |p: &PathBuf| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    };
+
+    // Exakt (Name oder Name ohne Endung), sonst unscharf – Spracherkennung
+    // schreibt „Bericht" gern als „Berichte".
+    let tolerance = (wanted_stem.chars().count() / 4).max(1);
+    let best = all
+        .iter()
+        .filter_map(|p| {
+            let distance = if name_of(p) == wanted_name {
+                0
+            } else {
+                levenshtein(&stem_of(p), &wanted_stem)
+            };
+            (distance <= tolerance).then_some((distance, p))
+        })
+        .min_by_key(|(d, p)| {
+            let age = p
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            (*d, std::cmp::Reverse(age))
+        })
+        .map(|(_, p)| p.clone());
+    match best {
         Some(p) => Ok(p),
         None => bail!("Ich finde keine Datei „{spoken}“ in Dokumente, Downloads, Desktop, Bilder, Musik oder Videos."),
     }
+}
+
+/// Anzahl Einfüge-, Lösch- und Ersetzungsschritte zwischen zwei Wörtern.
+pub fn levenshtein(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1; b.len() + 1];
+        for (j, cb) in b.iter().enumerate() {
+            cur[j + 1] = (prev[j] + usize::from(ca != *cb))
+                .min(prev[j + 1] + 1)
+                .min(cur[j] + 1);
+        }
+        prev = cur;
+    }
+    prev[b.len()]
 }
 
 fn expand_home(s: &str) -> PathBuf {
@@ -148,6 +181,21 @@ mod tests {
     fn custom_folder_must_stay_in_home() {
         assert!(resolve_folder(Some(&Folder::Custom("../x".into()))).is_err());
         assert!(resolve_folder(Some(&Folder::Custom("/etc".into()))).is_err());
+    }
+
+    #[test]
+    fn fuzzy_locate() {
+        let home = tempfile::tempdir().unwrap();
+        let docs = home.path().join("Documents");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("Bericht.pdf"), "x").unwrap();
+        std::fs::write(docs.join("Rechnung.pdf"), "x").unwrap();
+        // HOME umbiegen ist prozessweit – darum nur in diesem einen Test.
+        std::env::set_var("HOME", home.path());
+        assert_eq!(locate("Bericht").unwrap(), docs.join("Bericht.pdf"));
+        assert_eq!(locate("Berichte").unwrap(), docs.join("Bericht.pdf"));
+        assert_eq!(locate("bericht.pdf").unwrap(), docs.join("Bericht.pdf"));
+        assert!(locate("Urlaub").is_err());
     }
 
     #[test]

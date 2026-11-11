@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 
 /// Vergleichsform für App-Namen: klein, ohne Leer-/Sonderzeichen.
 pub fn squash(s: &str) -> String {
@@ -155,34 +155,44 @@ pub fn close_app(app: &str) -> Result<String> {
     Ok(format!("{app} wurde beendet."))
 }
 
-/// Liest Text mit der Systemstimme vor.
-pub async fn say(text: &str) -> Result<()> {
-    let mut cmd = if cfg!(target_os = "windows") {
+/// Befehle für die Systemstimme, in Reihenfolge der Vorliebe.
+fn say_commands(text: &str) -> Vec<std::process::Command> {
+    if cfg!(target_os = "windows") {
         // Text über eine Umgebungsvariable übergeben, damit nichts als Code ausgeführt wird.
-        let mut c = tokio::process::Command::new("powershell");
+        let mut c = std::process::Command::new("powershell");
         c.args(["-NoProfile", "-NonInteractive", "-Command"])
             .arg("Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak($env:JARVIS_SAY)")
             .env("JARVIS_SAY", text);
-        c
+        vec![c]
     } else if cfg!(target_os = "macos") {
-        let mut c = tokio::process::Command::new("say");
+        let mut c = std::process::Command::new("say");
         c.arg("--").arg(text);
-        c
+        vec![c]
     } else {
-        let mut c = tokio::process::Command::new("spd-say");
-        c.args(["--wait", "--"]).arg(text);
-        c
-    };
-    let status = cmd
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await
-        .context("Keine Sprachausgabe verfügbar")?;
-    if !status.success() {
-        bail!("Sprachausgabe fehlgeschlagen");
+        let mut spd = std::process::Command::new("spd-say");
+        spd.args(["--wait", "--"]).arg(text);
+        let mut espeak = std::process::Command::new("espeak-ng");
+        espeak.args(["-v", "de", "--"]).arg(text);
+        vec![spd, espeak]
     }
-    Ok(())
+}
+
+/// Liest Text mit der Systemstimme vor und wartet, bis er gesprochen ist.
+pub fn say_blocking(text: &str) -> Result<()> {
+    for mut cmd in say_commands(text) {
+        match cmd.stdout(Stdio::null()).stderr(Stdio::null()).status() {
+            Ok(s) if s.success() => return Ok(()),
+            Ok(_) => bail!("Sprachausgabe fehlgeschlagen"),
+            Err(_) => continue, // Programm nicht installiert -> nächstes probieren
+        }
+    }
+    bail!("Keine Sprachausgabe verfügbar")
+}
+
+/// Wie [`say_blocking`], ohne den async-Laufzeitkern zu blockieren.
+pub async fn say(text: &str) -> Result<()> {
+    let text = text.to_string();
+    tokio::task::spawn_blocking(move || say_blocking(&text)).await?
 }
 
 fn spawn_shell(cmd: &str) -> Result<()> {

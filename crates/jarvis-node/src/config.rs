@@ -19,6 +19,39 @@ pub struct Config {
     pub apps: BTreeMap<String, String>,
     #[serde(default)]
     pub brain: BrainSection,
+    #[serde(default)]
+    pub voice: VoiceSection,
+}
+
+/// Einstellungen für `jarvis-listen` (Spracheingabe).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoiceSection {
+    /// Whisper-Modell, z. B. "large-v3-turbo-q5_0" (Grafikkarte) oder
+    /// "small-q5_1" (nur Prozessor). Leer = automatisch passend zum Build.
+    pub model: Option<String>,
+    /// Sprache für die Erkennung ("de", "en" oder "auto").
+    pub language: String,
+    pub wake_words: Vec<String>,
+    /// Teil des Mikrofonnamens; leer = Standardmikrofon.
+    pub input_device: Option<String>,
+    /// Antworten vorlesen.
+    pub speak_replies: bool,
+    /// Nach „Jarvis" ohne Befehl so lange auf den Befehl warten (Sekunden).
+    pub follow_up_seconds: u64,
+}
+
+impl Default for VoiceSection {
+    fn default() -> Self {
+        Self {
+            model: None,
+            language: "de".into(),
+            wake_words: vec!["jarvis".into()],
+            input_device: None,
+            speak_replies: true,
+            follow_up_seconds: 8,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +207,7 @@ impl Config {
             },
             apps: BTreeMap::new(),
             brain: BrainSection::default(),
+            voice: VoiceSection::default(),
         };
         cfg.pairing_key()?;
         Ok(cfg)
