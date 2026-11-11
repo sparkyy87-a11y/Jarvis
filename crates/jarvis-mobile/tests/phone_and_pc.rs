@@ -100,11 +100,12 @@ fn phone_uses_pc_brain_and_sends_files() {
     std::env::set_var("HOME", home.path());
 
     // PC mit Sprachmodell
-    let mut pc_cfg = Config::new("Gaming-PC".into(), None).unwrap();
+    let mut pc_cfg = Config::new("Gaming-PC".into()).unwrap();
     pc_cfg.mesh.port = free_port();
     pc_cfg.mesh.mdns = false;
     pc_cfg.brain.provider = BrainProvider::Ollama;
     pc_cfg.brain.ollama_url = Some(fake_ollama());
+    pc_cfg.save_to(&home.path().join("pc.toml")).unwrap();
     let pc_rt = tokio::runtime::Runtime::new().unwrap();
     let pc = Node::new(pc_cfg.clone()).unwrap();
     pc_rt.spawn(pc.clone().listen());
@@ -112,11 +113,11 @@ fn phone_uses_pc_brain_and_sends_files() {
     // Handy koppeln wie nach dem QR-Scan
     let phone_dir = tempfile::tempdir().unwrap();
     let d = phone_dir.path().to_string_lossy().to_string();
-    let code = format!(
-        "jarvis://pair?v=1&key={}&name=Gaming-PC&addr=127.0.0.1:{}",
-        pc_cfg.mesh.pairing_key, pc_cfg.mesh.port
-    );
-    pair(d.clone(), "Handy".into(), "android".into(), code).unwrap();
+    // Wie `jarvisd pair` am PC: Einmal-Code erzeugen
+    let code = pc
+        .create_invite(Some(vec![format!("127.0.0.1:{}", pc_cfg.mesh.port)]))
+        .unwrap();
+    pair(d.clone(), "Handy".into(), "android".into(), code.clone()).unwrap();
     assert!(is_paired(d.clone()));
     let cfg_path = phone_dir.path().join("jarvis.toml");
     let mut phone_cfg = Config::load_from(&cfg_path).unwrap();
@@ -170,4 +171,49 @@ fn phone_uses_pc_brain_and_sends_files() {
         .contains(&"apple-music:Adele".to_string()));
     let r = pc_rt.block_on(pc.handle_text("Pause am Handy"));
     assert!(r.ok && r.text.ends_with("pause"), "{}", r.text);
+
+    // --- Sicherheit ---------------------------------------------------------
+    // Ein zweites Gerät mit demselben (schon verbrauchten) Code kommt nicht hinein.
+    let thief_dir = tempfile::tempdir().unwrap();
+    let td = thief_dir.path().to_string_lossy().to_string();
+    pair(td.clone(), "Fremd".into(), "android".into(), code).unwrap();
+    let tpath = thief_dir.path().join("jarvis.toml");
+    let mut tcfg = Config::load_from(&tpath).unwrap();
+    tcfg.mesh.mdns = false;
+    tcfg.mesh.port = free_port();
+    tcfg.save_to(&tpath).unwrap();
+    let thief = Jarvis::start(td, None, Arc::new(Bridge::default())).unwrap();
+    let t = Instant::now();
+    while thief.status().is_none_or(|s| !s.contains("ungültig")) {
+        assert!(
+            t.elapsed() < Duration::from_secs(10),
+            "zweite Kopplung mit demselben Code muss scheitern: {:?}",
+            thief.status()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(thief.devices().iter().all(|d| d.name != "Gaming-PC"));
+    assert_eq!(
+        phone.status(),
+        None,
+        "das echte Handy ist ordentlich gekoppelt"
+    );
+
+    // Handy verloren: am PC sperren -> Verbindung weg, und es kommt nicht wieder.
+    let r = pc_rt.block_on(pc.revoke("Handy")).unwrap();
+    assert!(r.contains("gesperrt"), "{r}");
+    let t = Instant::now();
+    while phone.devices().iter().any(|d| d.name == "Gaming-PC") {
+        assert!(
+            t.elapsed() < Duration::from_secs(5),
+            "gesperrtes Handy ist noch verbunden"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::sleep(Duration::from_secs(4)); // mehrere Wiederverbindungsversuche
+    assert!(
+        phone.devices().iter().all(|d| d.name != "Gaming-PC"),
+        "gesperrtes Handy hat sich wieder verbunden"
+    );
+    assert!(pc.trusted_devices().iter().all(|(name, _)| name != "Handy"));
 }

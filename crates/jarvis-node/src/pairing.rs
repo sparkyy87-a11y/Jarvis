@@ -7,25 +7,33 @@ use crate::config::Config;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pairing {
+    /// Öffentlicher Schlüssel des Geräts, das den Code zeigt (Fingerabdruck).
     pub key: String,
+    /// Einmal-Code (10 Minuten gültig, nur einmal nutzbar).
+    pub token: String,
     /// Name des Geräts, das den Code gezeigt hat.
     pub name: String,
     /// Adressen, unter denen es erreichbar ist ("192.168.1.20:7879").
     pub addrs: Vec<String>,
 }
 
-/// Link für dieses Gerät mit allen LAN-Adressen, die wir herausfinden können.
-pub fn link_for(cfg: &Config) -> String {
+/// Kopplungslink. Enthält kein dauerhaftes Geheimnis: nur den öffentlichen
+/// Schlüssel (damit sich niemand dazwischenschalten kann) und einen Einmal-Code.
+pub fn link_for(cfg: &Config, token: &str, addrs: Option<Vec<String>>) -> String {
+    let addrs = addrs.unwrap_or_else(|| {
+        lan_ips()
+            .into_iter()
+            .map(|ip| format!("{ip}:{}", cfg.mesh.port))
+            .collect()
+    });
     let mut url = format!(
-        "jarvis://pair?v=1&key={}&name={}",
-        cfg.mesh.pairing_key,
+        "jarvis://pair?v=2&key={}&token={}&name={}",
+        cfg.device.public_key,
+        token,
         encode(&cfg.device.name)
     );
-    for ip in lan_ips() {
-        url.push_str(&format!(
-            "&addr={}",
-            encode(&format!("{ip}:{}", cfg.mesh.port))
-        ));
+    for a in addrs {
+        url.push_str(&format!("&addr={}", encode(&a)));
     }
     url
 }
@@ -35,22 +43,35 @@ pub fn parse(link: &str) -> Result<Pairing> {
         .trim()
         .strip_prefix("jarvis://pair?")
         .context("Das ist kein Jarvis-Kopplungscode")?;
-    let (mut key, mut name, mut addrs) = (None, String::from("Jarvis"), Vec::new());
+    let (mut key, mut token, mut name, mut addrs) =
+        (None, None, String::from("Jarvis"), Vec::new());
     for part in query.split('&') {
         let (k, v) = part.split_once('=').unwrap_or((part, ""));
         let v = decode(v);
         match k {
             "key" => key = Some(v),
+            "token" => token = Some(v),
             "name" => name = v,
             "addr" => addrs.push(v),
             _ => {}
         }
     }
-    let key = key.context("Kopplungscode ohne Schlüssel")?;
-    if key.len() != 64 || !key.chars().all(|c| c.is_ascii_hexdigit()) {
-        bail!("Schlüssel im Kopplungscode ist ungültig");
+    let hexlen = |s: &str, n: usize| s.len() == n && s.chars().all(|c| c.is_ascii_hexdigit());
+    let key = key
+        .filter(|k| hexlen(k, 64))
+        .context("Kopplungscode ist unvollständig (Schlüssel fehlt)")?;
+    let token = token
+        .filter(|t| hexlen(t, 32))
+        .context("Kopplungscode ist veraltet – am PC neu `jarvisd pair` ausführen")?;
+    if addrs.is_empty() {
+        bail!("Kopplungscode enthält keine Adresse");
     }
-    Ok(Pairing { key, name, addrs })
+    Ok(Pairing {
+        key: key.to_lowercase(),
+        token,
+        name,
+        addrs,
+    })
 }
 
 /// Die Adresse, über die dieses Gerät ins Netz geht. Ein UDP-"connect" schickt
@@ -106,24 +127,26 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let mut cfg = Config::new("Gaming-PC Ü".into(), None).unwrap();
-        cfg.mesh.port = 7879;
-        let link = link_for(&cfg);
+        let cfg = Config::new("Gaming-PC Ü".into()).unwrap();
+        let token = "ab".repeat(16);
+        let link = link_for(&cfg, &token, Some(vec!["192.168.1.20:7879".into()]));
+        assert!(
+            !link.contains(&cfg.device.private_key),
+            "geheimer Schlüssel gehört nie in den Link"
+        );
         let p = parse(&link).unwrap();
-        assert_eq!(p.key, cfg.mesh.pairing_key);
+        assert_eq!(p.key, cfg.device.public_key);
+        assert_eq!(p.token, token);
         assert_eq!(p.name, "Gaming-PC Ü");
-        assert!(p.addrs.iter().all(|a| a.ends_with(":7879")));
+        assert_eq!(p.addrs, vec!["192.168.1.20:7879"]);
     }
 
     #[test]
-    fn parse_explicit() {
-        let key = "ab".repeat(32);
-        let p = parse(&format!(
-            "jarvis://pair?v=1&key={key}&name=PC&addr=192.168.1.20%3A7879&addr=10.0.0.5:7879"
-        ))
-        .unwrap();
-        assert_eq!(p.addrs, vec!["192.168.1.20:7879", "10.0.0.5:7879"]);
+    fn rejects_broken_codes() {
         assert!(parse("https://example.com").is_err());
         assert!(parse("jarvis://pair?key=123").is_err());
+        let key = "ab".repeat(32);
+        // alter Link ohne Einmal-Code
+        assert!(parse(&format!("jarvis://pair?v=1&key={key}&addr=1.2.3.4:7879")).is_err());
     }
 }

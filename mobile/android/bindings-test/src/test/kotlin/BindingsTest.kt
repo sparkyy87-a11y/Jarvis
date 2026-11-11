@@ -60,11 +60,15 @@ class BindingsTest {
                 .replace("mdns = true", "mdns = false")
                 .replace("provider = \"auto\"", "provider = \"off\""),
         )
-        // Kopplungslink genau so, wie `jarvisd pair` ihn zeigt.
-        val pairOut = jarvisd("pair").redirectErrorStream(true).start().inputStream.bufferedReader().readText()
-        val link = pairOut.lines().firstOrNull { it.startsWith("jarvis://pair?") } ?: error("Kein Link:\n$pairOut")
         val pc = jarvisd().redirectErrorStream(true).redirectOutput(File(pcHome, "pc.log")).start()
         try {
+            val tokenFile = File(pcHome, "control.token")
+            val ready = System.currentTimeMillis() + 10_000
+            while (!tokenFile.exists()) { check(System.currentTimeMillis() < ready) { "jarvisd startet nicht" }; Thread.sleep(100) }
+            Thread.sleep(300)
+            // Kopplungslink mit Einmal-Code genau so, wie `jarvisd pair` ihn zeigt.
+            val pairOut = jarvisd("pair").redirectErrorStream(true).start().inputStream.bufferedReader().readText()
+            val link = Regex("jarvis://pair\\?[^\"\\s]*").find(pairOut)?.value ?: error("Kein Link:\n$pairOut")
             val phoneDir = Files.createTempDirectory("phone").toString()
             val info = pair(phoneDir, "Pixel", "android", link)
             assertEquals("Gaming-PC", info.name)
@@ -74,6 +78,7 @@ class BindingsTest {
 
             val bridge = FakeBridge()
             val phone = Jarvis.start(phoneDir, null, bridge)
+            assertTrue(phone.status()?.contains("Kopplung läuft") ?: true)
             val until = System.currentTimeMillis() + 15_000
             while (phone.devices().none { it.name == "Gaming-PC" }) {
                 check(System.currentTimeMillis() < until) { "Handy findet den PC nicht:\n" + File(pcHome, "pc.log").readText() }
@@ -83,6 +88,7 @@ class BindingsTest {
             // Rust ruft Kotlin zurück (PlatformBridge.openApp)
             val r = phone.ask("öffne Spotify")
             assertTrue(r.ok, r.text)
+            assertEquals(null, phone.status(), "Kopplung abgeschlossen")
             assertEquals(listOf("Spotify"), bridge.opened.toList())
 
             // Google-Suche und Musik laufen über die Kotlin-Brücke

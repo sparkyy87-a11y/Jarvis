@@ -17,10 +17,8 @@ pub async fn run(node: Arc<Node>, port: u16) -> Result<()> {
         .to_string_lossy()
         .replace(' ', "-");
     let instance = format!("jarvis-{}", node.me.id.simple());
-    let props = [
-        ("id", node.me.id.to_string()),
-        ("name", node.me.name.clone()),
-    ];
+    // Kein Gerätename im Netz (z. B. im Café-WLAN) – nur ID und öffentlicher Schlüssel.
+    let props = [("id", node.me.id.to_string()), ("key", node.public_key())];
     let service = ServiceInfo::new(
         MDNS_SERVICE_TYPE,
         &instance,
@@ -44,8 +42,12 @@ pub async fn run(node: Arc<Node>, port: u16) -> Result<()> {
         else {
             continue;
         };
+        // Nur mit eigenen (gekoppelten) Geräten verbinden – fremde Jarvis im Netz ignorieren.
+        let trusted = info
+            .get_property_val_str("key")
+            .is_some_and(|k| node.is_trusted_key(k));
         // Nur eine Seite baut die Verbindung auf: die mit der kleineren ID.
-        if id == node.me.id || node.me.id > id || node.is_connected(&id) {
+        if !trusted || id == node.me.id || node.me.id > id || node.is_connected(&id) {
             continue;
         }
         let Some(ip) = info
@@ -57,10 +59,7 @@ pub async fn run(node: Arc<Node>, port: u16) -> Result<()> {
             continue;
         };
         let addr = SocketAddr::new(ip, info.get_port());
-        debug!(
-            "Gefunden: {} unter {addr}",
-            info.get_property_val_str("name").unwrap_or("?")
-        );
+        debug!("Eigenes Gerät gefunden unter {addr}");
         let node = node.clone();
         tokio::spawn(async move {
             if let Err(e) = node.connect(addr, None).await {

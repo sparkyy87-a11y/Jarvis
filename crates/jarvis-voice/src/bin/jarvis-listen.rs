@@ -5,7 +5,7 @@
 //!   jarvis-listen --datei befehl.wav    Aufnahme statt Mikrofon (Test)
 //!   jarvis-listen --trocken             nur anzeigen, nichts ausführen
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -16,7 +16,7 @@ use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SizedSample};
 use jarvis_node::config::{Config, VoiceSection, DEFAULT_CONTROL_PORT};
-use jarvis_node::control::{Request, Response};
+use jarvis_node::control::{self, Request, Response};
 use jarvis_node::events::HudEvent;
 use jarvis_node::exec;
 use jarvis_voice::audio::{downmix, Resampler};
@@ -54,6 +54,7 @@ type Detector = Box<dyn SpeechDetector + Send>;
 struct App {
     voice: VoiceSection,
     control_port: u16,
+    token_path: PathBuf,
     dry: bool,
     speak: bool,
     stt: Transcriber,
@@ -64,14 +65,16 @@ struct App {
 /// Schickt HUD-Ereignisse an jarvisd (ohne auf Antwort zu warten).
 struct EventSink {
     port: u16,
+    token_path: PathBuf,
     stream: Option<TcpStream>,
     last_level: Instant,
 }
 
 impl EventSink {
-    fn new(port: u16) -> Self {
+    fn new(port: u16, token_path: PathBuf) -> Self {
         Self {
             port,
+            token_path,
             stream: None,
             last_level: Instant::now(),
         }
@@ -84,7 +87,9 @@ impl EventSink {
         };
         line.push('\n');
         if self.stream.is_none() {
-            self.stream = TcpStream::connect(("127.0.0.1", self.port)).ok();
+            self.stream = control::connect_blocking(self.port, &self.token_path)
+                .ok()
+                .map(|(s, _)| s);
         }
         if let Some(s) = &mut self.stream {
             if s.write_all(line.as_bytes()).is_err() {
@@ -125,6 +130,10 @@ fn main() -> Result<()> {
         .as_ref()
         .map(|c| c.mesh.control_port)
         .unwrap_or(DEFAULT_CONTROL_PORT);
+    let token_path = cfg
+        .as_ref()
+        .map(|c| c.control_token_path())
+        .unwrap_or_else(Config::default_control_token_path);
 
     let model_name = cli
         .modell
@@ -164,7 +173,8 @@ fn main() -> Result<()> {
         voice,
         control_port,
         dry: cli.trocken,
-        events: EventSink::new(control_port),
+        events: EventSink::new(control_port, token_path.clone()),
+        token_path,
         stt,
     };
 
@@ -297,7 +307,7 @@ impl App {
                 if self.dry {
                     return false;
                 }
-                let reply = match ask_jarvisd(self.control_port, &cmd) {
+                let reply = match ask_jarvisd(self.control_port, &self.token_path, &cmd) {
                     Ok(r) => r.text.unwrap_or_default(),
                     Err(e) => format!("{e:#}"),
                 };
@@ -341,18 +351,15 @@ where
     )?)
 }
 
-fn ask_jarvisd(port: u16, text: &str) -> Result<Response> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port)).context("jarvisd läuft nicht")?;
-    stream.set_read_timeout(Some(Duration::from_secs(90)))?;
-    let mut line = serde_json::to_string(&Request::Text {
-        text: text.to_string(),
-        source: Some("Sprache".into()),
-    })?;
-    line.push('\n');
-    stream.write_all(line.as_bytes())?;
-    let mut answer = String::new();
-    BufReader::new(stream).read_line(&mut answer)?;
-    Ok(serde_json::from_str(&answer)?)
+fn ask_jarvisd(port: u16, token_path: &std::path::Path, text: &str) -> Result<Response> {
+    control::request_blocking(
+        port,
+        token_path,
+        &Request::Text {
+            text: text.to_string(),
+            source: Some("Sprache".into()),
+        },
+    )
 }
 
 fn list_microphones() -> Result<()> {

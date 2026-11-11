@@ -18,4 +18,5 @@ pub mod host;
 pub mod node;
 pub mod pairing;
 pub mod transport;
+pub mod trust;
 pub mod web;

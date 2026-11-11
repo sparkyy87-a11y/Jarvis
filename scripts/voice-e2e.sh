@@ -25,16 +25,17 @@ ffmpeg -loglevel error -i "$W/s.wav" -i "$W/a.wav" -i "$W/s.wav" -i "$W/b.wav" -
 for dev in pc ipad; do mkdir -p "$W/$dev/.local/share/jarvis"; ln -s "$MODELS" "$W/$dev/.local/share/jarvis/models"; done
 pc()   { env HOME="$W/pc"   JARVIS_CONFIG="$W/pc/config.toml"   "$@"; }
 ipad() { env HOME="$W/ipad" JARVIS_CONFIG="$W/ipad/config.toml" "$@"; }
-pc   "$B/jarvisd" init --name Gaming-PC >/dev/null
-ipad "$B/jarvisd" join "$(pc "$B/jarvisd" key)" --name iPad >/dev/null
+pc "$B/jarvisd" init --name Gaming-PC >/dev/null
 sed -i 's/^mdns = true/mdns = false/' "$W/pc/config.toml"
 sed -i "s|^\[apps\]|[apps]\nminecraft = \"echo gestartet > '$W/pc/minecraft.log'\"|" "$W/pc/config.toml"
-sed -i 's/^port = 7879/port = 7889/; s/^control_port = 7878/control_port = 7888/; s/^mdns = true/mdns = false/;
-        s/^static_peers = \[\]/static_peers = ["127.0.0.1:7879"]/' "$W/ipad/config.toml"
+env HOME="$W/pc" JARVIS_CONFIG="$W/pc/config.toml" "$B/jarvisd" > "$W/pc.log" 2>&1 & PIDS+=($!)
+for _ in $(seq 50); do test -f "$W/pc/control.token" && break; sleep 0.1; done
+sleep 0.3
+link=$(pc "$B/jarvisd" pair | grep -o 'jarvis://pair?[^"]*' | sed 's/&addr=[^&]*/\&addr=127.0.0.1%3A7879/')
+ipad "$B/jarvisd" join "$link" --name iPad >/dev/null
+sed -i 's/^port = 7879/port = 7889/; s/^control_port = 7878/control_port = 7888/; s/^mdns = true/mdns = false/' "$W/ipad/config.toml"
 mkdir -p "$W/ipad/Documents" && echo "Quartalsbericht" > "$W/ipad/Documents/Bericht.pdf"
-
-pc   "$B/jarvisd" > "$W/pc.log"   2>&1 & PIDS+=($!)
-ipad "$B/jarvisd" > "$W/ipad.log" 2>&1 & PIDS+=($!)
+env HOME="$W/ipad" JARVIS_CONFIG="$W/ipad/config.toml" "$B/jarvisd" > "$W/ipad.log" 2>&1 & PIDS+=($!)
 for _ in $(seq 100); do ipad "$B/jarvis" geräte 2>/dev/null | grep -q Gaming-PC && break; sleep 0.1; done
 
 ipad "$B/jarvis-listen" --datei "$W/aufnahme.wav" --leise 2>&1 | sed 's/\x1b\[[0-9;]*m//g; s/^.*jarvis_listen: //' | tee "$W/listen.log"

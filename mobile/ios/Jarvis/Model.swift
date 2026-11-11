@@ -25,6 +25,10 @@ final class JarvisModel: ObservableObject {
     @Published var entries: [Entry] = []
     @Published var devices: [Device] = []
     @Published var message: String?
+    /// Code aus einem jarvis://-Link (wird nur vorausgefüllt).
+    @Published var pendingCode = ""
+    /// Hinweis, solange die Kopplung nicht abgeschlossen ist.
+    @Published var status: String?
     /// Zustand des Rings (Zuhören setzt die Ansicht selbst).
     @Published var orb: OrbMode = .idle
 
@@ -80,13 +84,15 @@ final class JarvisModel: ObservableObject {
     }
 
     /// Kopplung mit dem Code aus `jarvisd pair` (QR-Code oder eingefügt).
-    func connect(code: String) {
-        let (dir, name, platform) = (Self.dataDir, deviceName, platform)
+    func connect(code: String, name: String) {
+        let chosen = name.trimmingCharacters(in: .whitespaces)
+        let (dir, platform) = (Self.dataDir, platform)
+        let deviceName = chosen.isEmpty ? self.deviceName : chosen
         Task.detached {
             do {
-                let info = try pair(dataDir: dir, deviceName: name, platform: platform, code: code)
+                let info = try pair(dataDir: dir, deviceName: deviceName, platform: platform, code: code.trimmingCharacters(in: .whitespacesAndNewlines))
                 await MainActor.run {
-                    self.message = "Gekoppelt mit \(info.name)."
+                    self.message = "Kopplung mit \(info.name) läuft …"
                     self.start()
                 }
             } catch {
@@ -171,8 +177,9 @@ final class JarvisModel: ObservableObject {
         pollTask = Task {
             while !Task.isCancelled {
                 if let j = jarvis {
-                    let list = await Task.detached { j.devices() }.value
+                    let (list, state) = await Task.detached { (j.devices(), j.status()) }.value
                     devices = list.filter { !$0.thisDevice }
+                    status = state
                 }
                 try? await Task.sleep(for: .seconds(2))
             }

@@ -15,6 +15,10 @@ struct ContentView: View {
 struct PairingView: View {
     @EnvironmentObject private var model: JarvisModel
     @State private var code = ""
+    @State private var name = ""
+
+    /// Wohin gekoppelt wird – nur bei gültigem Code.
+    private var target: String? { try? parsePairingCode(code: code.trimmingCharacters(in: .whitespacesAndNewlines)).name }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -23,7 +27,7 @@ struct PairingView: View {
             Mit deinem PC koppeln:
 
             1. Am PC im Terminal: jarvisd pair
-            2. Den QR-Code mit der Kamera-App scannen – Jarvis öffnet sich und ist gekoppelt.
+            2. Den QR-Code mit der Kamera-App scannen – Jarvis öffnet sich mit dem Code.
 
             Oder den Code hier einfügen:
             """)
@@ -31,15 +35,22 @@ struct PairingView: View {
                 .textFieldStyle(.roundedBorder)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-            Button("Koppeln") { model.connect(code: code) }
+            TextField("Name dieses Geräts, z. B. iPad Wohnzimmer", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Button(target.map { "Mit „\($0)“ koppeln" } ?? "Koppeln") { model.connect(code: code, name: name) }
                 .buttonStyle(.borderedProminent)
-                .disabled(code.isEmpty)
+                .disabled(target == nil)
             if let message = model.message {
                 Text(message).foregroundStyle(.red)
             }
         }
         .padding(24)
         .frame(maxWidth: 560)
+        .onAppear {
+            if name.isEmpty { name = model.deviceName }
+            if code.isEmpty { code = model.pendingCode }
+        }
+        .onChange(of: model.pendingCode) { code = model.pendingCode }
     }
 }
 
@@ -114,7 +125,7 @@ struct ChatView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack {
                 if model.devices.isEmpty {
-                    Label("Suche deine Geräte …", systemImage: "antenna.radiowaves.left.and.right")
+                    Label(model.status ?? "Suche deine Geräte …", systemImage: "antenna.radiowaves.left.and.right")
                         .font(.footnote).padding(8)
                         .background(.thinMaterial, in: Capsule())
                 }

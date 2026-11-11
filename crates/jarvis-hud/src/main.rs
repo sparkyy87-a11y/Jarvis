@@ -9,8 +9,7 @@
 mod draw;
 mod state;
 
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
+use std::io::{BufRead, Write};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -65,11 +64,16 @@ impl eframe::App for HudApp {
 }
 
 /// Hält die Verbindung zu jarvisd und reicht Ereignisse weiter.
-fn listen(port: u16, tx: mpsc::Sender<HudEvent>, ctx: egui::Context) {
+fn listen(
+    port: u16,
+    token_path: std::path::PathBuf,
+    tx: mpsc::Sender<HudEvent>,
+    ctx: egui::Context,
+) {
     loop {
-        if let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)) {
+        if let Ok((mut s, reader)) = jarvis_node::control::connect_blocking(port, &token_path) {
             if s.write_all(b"{\"cmd\":\"subscribe\"}\n").is_ok() {
-                for line in BufReader::new(s).lines() {
+                for line in reader.lines() {
                     let Ok(line) = line else { break };
                     if let Ok(e) = serde_json::from_str::<HudEvent>(&line) {
                         if tx.send(e).is_err() {
@@ -133,6 +137,10 @@ fn main() -> eframe::Result {
         .as_ref()
         .map(|c| c.hud.position.clone())
         .unwrap_or_default();
+    let token_path = cfg
+        .as_ref()
+        .map(|c| c.control_token_path())
+        .unwrap_or_else(Config::default_control_token_path);
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -156,7 +164,7 @@ fn main() -> eframe::Result {
                 if demo_mode {
                     demo(tx, ctx)
                 } else {
-                    listen(port, tx, ctx)
+                    listen(port, token_path, tx, ctx)
                 }
             });
             Ok(Box::new(HudApp {

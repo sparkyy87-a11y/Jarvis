@@ -6,11 +6,16 @@ use jarvis_protocol::Platform;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::transport::Identity;
+
 pub const DEFAULT_MESH_PORT: u16 = 7879;
 pub const DEFAULT_CONTROL_PORT: u16 = 7878;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Datei, aus der die Konfiguration stammt (Nachbardateien: trust.toml, control.token).
+    #[serde(skip)]
+    pub source: Option<PathBuf>,
     pub device: DeviceSection,
     pub mesh: MeshSection,
     /// Eigene Kurzbefehle: gesprochener Name -> Programm/Befehl,
@@ -105,6 +110,9 @@ pub struct DeviceSection {
     /// Nur nötig, um iPadOS von iOS zu unterscheiden.
     #[serde(default)]
     pub platform: Option<Platform>,
+    /// Eigener Geräteschlüssel (X25519, hex). Geheim – nie weitergeben.
+    pub private_key: String,
+    pub public_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,8 +121,6 @@ pub struct MeshSection {
     pub port: u16,
     #[serde(default = "default_control_port")]
     pub control_port: u16,
-    /// 32 Byte, hex. Alle eigenen Geräte teilen denselben Schlüssel.
-    pub pairing_key: String,
     /// Feste Adressen ("192.168.1.20:7879"), falls mDNS im Netz nicht geht.
     #[serde(default)]
     pub static_peers: Vec<String>,
@@ -211,46 +217,62 @@ impl Config {
         let text = std::fs::read_to_string(&path).with_context(|| {
             format!("{} fehlt – zuerst `jarvisd init` ausführen", path.display())
         })?;
-        let cfg: Config =
+        let mut cfg: Config =
             toml::from_str(&text).with_context(|| format!("{} ist ungültig", path.display()))?;
-        cfg.pairing_key()?;
+        cfg.identity()?;
+        cfg.source = Some(path);
         Ok(cfg)
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&mut self) -> Result<()> {
         self.save_to(&Self::path())
     }
 
-    pub fn save_to(&self, path: &std::path::Path) -> Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(path, toml::to_string_pretty(self)?)?;
+    /// Speichert nur für den eigenen Benutzer lesbar (enthält den Geräteschlüssel).
+    pub fn save_to(&mut self, path: &std::path::Path) -> Result<()> {
+        crate::trust::write_private(path, &toml::to_string_pretty(self)?)?;
+        self.source = Some(path.to_path_buf());
         Ok(())
     }
 
-    /// Neue Konfiguration mit frischer Geräte-ID. Ohne `pairing_key` wird ein
-    /// neuer Schlüssel erzeugt (erstes Gerät), sonst wird er übernommen.
-    pub fn new(name: String, pairing_key: Option<String>) -> Result<Self> {
-        let pairing_key = match pairing_key {
-            Some(k) => k.trim().to_lowercase(),
-            None => {
-                let mut key = [0u8; 32];
-                rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
-                hex::encode(key)
-            }
-        };
+    fn sibling(&self, name: &str) -> PathBuf {
+        let base = self.source.clone().unwrap_or_else(Self::path);
+        base.parent()
+            .map(|d| d.join(name))
+            .unwrap_or_else(|| PathBuf::from(name))
+    }
+
+    /// Vertrauensliste (welche Geräte dazugehören).
+    pub fn trust_path(&self) -> PathBuf {
+        self.sibling("trust.toml")
+    }
+
+    /// Token-Pfad, wenn (noch) keine Konfiguration geladen ist.
+    pub fn default_control_token_path() -> PathBuf {
+        Self::path().with_file_name("control.token")
+    }
+
+    /// Zugangs-Token für die lokale Steuerschnittstelle.
+    pub fn control_token_path(&self) -> PathBuf {
+        self.sibling("control.token")
+    }
+
+    /// Neue Konfiguration mit frischer Geräte-ID und eigenem Schlüsselpaar.
+    pub fn new(name: String) -> Result<Self> {
+        let id = Identity::generate()?;
         let cfg = Config {
+            source: None,
             device: DeviceSection {
                 id: Uuid::new_v4(),
                 name,
                 aliases: vec![],
                 platform: None,
+                private_key: hex::encode(id.private),
+                public_key: id.public_hex(),
             },
             mesh: MeshSection {
                 port: DEFAULT_MESH_PORT,
                 control_port: DEFAULT_CONTROL_PORT,
-                pairing_key,
                 static_peers: vec![],
                 mdns: true,
             },
@@ -260,16 +282,21 @@ impl Config {
             hud: HudSection::default(),
             music: MusicSection::default(),
         };
-        cfg.pairing_key()?;
         Ok(cfg)
     }
 
-    pub fn pairing_key(&self) -> Result<[u8; 32]> {
-        let bytes = hex::decode(&self.mesh.pairing_key).context("pairing_key ist kein Hex")?;
-        match <[u8; 32]>::try_from(bytes.as_slice()) {
-            Ok(k) => Ok(k),
-            Err(_) => bail!("pairing_key muss 64 Hex-Zeichen (32 Byte) lang sein"),
-        }
+    pub fn identity(&self) -> Result<Identity> {
+        let key = |hex_str: &str, what: &str| -> Result<[u8; 32]> {
+            let bytes = hex::decode(hex_str).with_context(|| format!("{what} ist kein Hex"))?;
+            match <[u8; 32]>::try_from(bytes.as_slice()) {
+                Ok(k) => Ok(k),
+                Err(_) => bail!("{what} muss 64 Hex-Zeichen lang sein"),
+            }
+        };
+        Ok(Identity {
+            private: key(&self.device.private_key, "private_key")?,
+            public: key(&self.device.public_key, "public_key")?,
+        })
     }
 
     pub fn platform(&self) -> Platform {

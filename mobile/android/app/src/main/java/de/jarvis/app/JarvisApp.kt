@@ -37,6 +37,8 @@ class JarvisApp : Application() {
     val entries = MutableStateFlow(listOf<Entry>())
     val devices = MutableStateFlow(listOf<Device>())
     val paired = MutableStateFlow(false)
+    /** Hinweis, solange die Kopplung nicht abgeschlossen ist. */
+    val status = MutableStateFlow<String?>(null)
     /** Zustand des Rings (Zuhören setzt die Activity selbst). */
     val orb = MutableStateFlow(OrbMode.Idle)
     /** Mikrofonpegel 0..1 während des Zuhörens. */
@@ -72,6 +74,7 @@ class JarvisApp : Application() {
         scope.launch {
             while (true) {
                 devices.value = jarvis?.devices()?.filterNot { it.thisDevice } ?: emptyList()
+                status.value = jarvis?.status()
                 delay(2000)
             }
         }
@@ -95,9 +98,9 @@ class JarvisApp : Application() {
     }
 
     /** Kopplung mit dem Code aus `jarvisd pair` (QR-Code oder eingefügt). */
-    fun pairWith(code: String): String = try {
-        val info = pair(dataDir, deviceName(), "android", code.trim())
-        start() ?: "Gekoppelt mit ${info.name}."
+    fun pairWith(code: String, name: String): String = try {
+        val info = pair(dataDir, name.trim().ifEmpty { deviceName() }, "android", code.trim())
+        start() ?: "Kopplung mit ${info.name} läuft …"
     } catch (e: JarvisException) {
         e.message ?: "Kopplung fehlgeschlagen"
     }

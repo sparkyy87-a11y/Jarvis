@@ -77,6 +77,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.jarvis_mobile.parsePairingCode
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -85,6 +86,8 @@ class MainActivity : ComponentActivity() {
     /** Datei, die gerade an ein Gerät geschickt werden soll (aus „Teilen" oder Auswahl). */
     private val pendingShare = MutableStateFlow<Uri?>(null)
     private val pairMessage = MutableStateFlow<String?>(null)
+    /** Code aus einem jarvis://-Link – wird nur vorausgefüllt, nie still gekoppelt. */
+    private val pendingCode = MutableStateFlow("")
     private val listening = MutableStateFlow(false)
     private var recognizer: SpeechRecognizer? = null
 
@@ -117,8 +120,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         when (intent?.action) {
+            // Sicherheit: Ein Link (z. B. von einer Webseite) füllt nur das Formular vor.
+            // Gekoppelt wird erst, wenn du das Ziel siehst und selbst bestätigst.
             Intent.ACTION_VIEW -> intent.data?.takeIf { it.scheme == "jarvis" }?.let { uri ->
-                app.scope.launch { pairMessage.value = app.pairWith(uri.toString()) }
+                if (!app.paired.value) pendingCode.value = uri.toString()
             }
             Intent.ACTION_SEND -> {
                 val uri = if (Build.VERSION.SDK_INT >= 33) {
@@ -217,7 +222,10 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Pairing() {
-        var code by remember { mutableStateOf("") }
+        val linked by pendingCode.collectAsState()
+        var code by remember(linked) { mutableStateOf(linked) }
+        var name by remember { mutableStateOf(app.deviceName()) }
+        val target = remember(code) { runCatching { parsePairingCode(code.trim()).name }.getOrNull() }
         val message by pairMessage.collectAsState()
         val scope = androidx.compose.runtime.rememberCoroutineScope()
         Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
@@ -226,7 +234,7 @@ class MainActivity : ComponentActivity() {
             Text(
                 "Mit deinem PC koppeln:\n\n" +
                     "1. Am PC im Terminal: jarvisd pair\n" +
-                    "2. Den QR-Code mit der Handykamera scannen – Jarvis öffnet sich und ist gekoppelt.\n\n" +
+                    "2. Den QR-Code mit der Handykamera scannen – Jarvis öffnet sich mit dem Code.\n\n" +
                     "Oder den Code hier einfügen:",
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -235,11 +243,17 @@ class MainActivity : ComponentActivity() {
                 value = code, onValueChange = { code = it },
                 label = { Text("jarvis://pair?…") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = name, onValueChange = { name = it },
+                label = { Text("Name dieses Geräts, z. B. Handy oder Tablet Küche") },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(Modifier.height(12.dp))
             Button(
-                onClick = { scope.launch { pairMessage.value = withContext(Dispatchers.IO) { app.pairWith(code) } } },
-                enabled = code.isNotBlank(),
-            ) { Text("Koppeln") }
+                onClick = { scope.launch { pairMessage.value = withContext(Dispatchers.IO) { app.pairWith(code, name) } } },
+                enabled = target != null,
+            ) { Text(if (target != null) "Mit „$target“ koppeln" else "Koppeln") }
             message?.let {
                 Spacer(Modifier.height(12.dp))
                 Text(it, color = MaterialTheme.colorScheme.error)
@@ -253,6 +267,7 @@ class MainActivity : ComponentActivity() {
         val devices by app.devices.collectAsState()
         val isListening by listening.collectAsState()
         val orbState by app.orb.collectAsState()
+        val pairingStatus by app.status.collectAsState()
         val level by app.level.collectAsState()
         val share by pendingShare.collectAsState()
         var input by remember { mutableStateOf("") }
@@ -290,7 +305,7 @@ class MainActivity : ComponentActivity() {
             }
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
                 if (devices.isEmpty()) {
-                    AssistChip(onClick = {}, label = { Text("Suche deine Geräte …") })
+                    AssistChip(onClick = {}, label = { Text(pairingStatus ?: "Suche deine Geräte …") })
                 }
                 devices.forEach { d ->
                     AssistChip(onClick = {}, label = { Text(d.name) }, modifier = Modifier.padding(end = 8.dp))

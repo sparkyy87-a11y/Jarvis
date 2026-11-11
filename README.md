@@ -19,7 +19,7 @@ Regeln einen Satz nicht verstehen.
 | Funktion | Status |
 |---|---|
 | Geräte finden sich im LAN (mDNS) oder über feste Adressen | ✅ |
-| Verschlüsselte Verbindung, nur eigene Geräte (Noise + Pairing-Schlüssel) | ✅ |
+| Verschlüsselt, eigener Schlüssel pro Gerät, Kopplung per Einmal-Code, Geräte sperrbar | ✅ |
 | Befehle verstehen, Deutsch und Englisch, ohne Netz (< 1 ms) | ✅ |
 | Freie Sätze und Fragen über ein lokales Modell (Ollama) – kostenlos | ✅ |
 | … oder über Claude (bessere Antworten, API kostet) | ✅ optional |
@@ -41,12 +41,17 @@ git clone https://github.com/sparkyy87-a11y/Jarvis.git && cd Jarvis
 cargo build --release          # Programme liegen danach in target/release/
 
 # Erstes Gerät (z. B. der PC)
-jarvisd init --name Gaming-PC  # gibt den Pairing-Schlüssel aus
-jarvisd                        # Dienst starten
+jarvisd init --name Gaming-PC
+jarvisd autostart an           # Dienst starten (und bei jeder Anmeldung)
+jarvisd pair                   # QR-Code + Einmal-Code für das nächste Gerät
 
-# Jedes weitere Gerät
-jarvisd join <schlüssel> --name Laptop
-jarvisd
+# Weiterer PC/Laptop: den Befehl aus `jarvisd pair` ausführen
+jarvisd join "jarvis://pair?…" --name Laptop
+jarvisd autostart an
+# Handy/Tablet: QR-Code mit der Kamera scannen, Namen eingeben, bestätigen
+
+jarvisd geraete                # alle gekoppelten Geräte
+jarvisd entfernen Handy        # verlorenes Gerät sperren
 
 # Befehle geben (auf jedem Gerät)
 jarvis geräte
@@ -250,7 +255,6 @@ aliases = ["großer rechner"]      # zusätzliche Namen: „öffne Steam am gro�
 [mesh]
 port = 7879                        # Verbindungen zwischen Geräten
 control_port = 7878                # lokale Steuerung (nur 127.0.0.1)
-pairing_key = "…"                  # auf allen eigenen Geräten gleich
 static_peers = ["192.168.1.20:7879"]  # falls mDNS im Netz blockiert ist
 mdns = true
 
@@ -303,21 +307,51 @@ Mikrosekunden, ohne Netz. Die Geräte halten eine dauerhafte, verschlüsselte
 TCP-Verbindung offen; ein Befehl an den PC ist ein einziges kleines Paket. Das
 Sprachmodell wird nur für Sätze gefragt, die die Regeln nicht kennen.
 
-**Wie ein Zielgerät gefunden wird:** Erst exakter Name oder Alias, dann
-Gattungsname („PC", „iPad", „Handy"). Passen zwei Geräte, fragt Jarvis nach, statt zu raten.
+**Wie ein Zielgerät gefunden wird:** Erst exakter Name oder Alias, dann ein
+Gerät, dessen Name das Wort enthält („am PC" → „Gaming-PC", „am iPad" → „iPad
+Büro"), zuletzt der Gattungsname („PC", „iPad", „Handy"). Passen zwei Geräte,
+fragt Jarvis nach, statt zu raten – bei zwei iPads also am besten „iPad
+Wohnzimmer" und „iPad Büro" nennen.
 
 ## Sicherheit
 
-- Geräte verbinden sich nur mit dem gemeinsamen Pairing-Schlüssel
-  (Noise `NNpsk0`, ChaCha20-Poly1305). Wer den Schlüssel nicht hat, kommt nicht
-  durch den Handshake; alle Daten sind verschlüsselt.
+**Geräte und Kopplung**
+- Jedes Gerät hat ein **eigenes Schlüsselpaar** (X25519). Verbindungen laufen über
+  Noise `XX` mit ChaCha20-Poly1305: beide Seiten beweisen ihren Schlüssel, alles
+  ist verschlüsselt, alte Mitschnitte bleiben auch später geheim (Forward Secrecy).
+- Es gibt **kein gemeinsames Passwort**. Ein neues Gerät kommt nur mit einem
+  **Einmal-Code** hinein (`jarvisd pair`, 10 Minuten gültig, nur einmal nutzbar).
+  Der QR-Code enthält außerdem den Fingerabdruck des PCs – ein Gerät, das sich
+  dazwischenschalten will, fällt auf.
+- Ein `jarvis://`-Link koppelt nie still: die App zeigt „Mit „Gaming-PC“ koppeln"
+  und wartet auf deine Bestätigung.
+- **Verlorenes Gerät:** `jarvisd entfernen Handy` sperrt es sofort; die Sperre
+  verbreitet sich an alle deine Geräte, es kommt nicht wieder hinein.
+- Fremde Jarvis-Geräte im selben WLAN werden ignoriert; im Netz wird kein
+  Gerätename angekündigt.
+
+**Auf dem Gerät**
+- Die lokale Steuerung (`127.0.0.1:7878`) verlangt ein **Zugangs-Token**, das nur
+  dein Benutzerkonto lesen kann – Webseiten im Browser und andere Benutzer am
+  Rechner können Jarvis nicht steuern.
+- Konfiguration, Geräteschlüssel und Vertrauensliste sind nur für dich lesbar
+  (Unix 0600, Windows: Benutzerprofil).
+
+**Dateien**
 - Empfangene Dateinamen werden auf den reinen Namen reduziert (kein `../`),
-  eigene Zielordner müssen unterhalb des Home-Verzeichnisses liegen.
+  eigene Zielordner liegen immer unterhalb des Home-Verzeichnisses.
 - Dateien landen erst als `.jarvis-part` und werden nur nach korrekter SHA-256
-  umbenannt; vorhandene Dateien werden nie überschrieben.
-- Die Steuerung (`7878`) lauscht nur auf `127.0.0.1`.
-- Ein Gerät mit dem Schlüssel darf auf allen anderen Apps starten. Den Schlüssel
-  wie ein Passwort behandeln.
+  umbenannt; vorhandene Dateien werden nie überschrieben; höchstens 8 GB.
+- Unter Windows tragen empfangene Dateien die Internet-Markierung: SmartScreen
+  warnt, bevor eine empfangene `.exe` startet.
+
+**Bewusste Grenzen**
+- Ein gekoppeltes Gerät darf auf den anderen Apps öffnen, Musik steuern und
+  Dateien in deine Ordner legen – dafür ist Jarvis da. Koppel nur eigene Geräte.
+- Jarvis lauscht im WLAN auf Port 7879. Windows fragt beim ersten Start nach der
+  Firewall: nur **„Private Netzwerke"** erlauben.
+- Auf dem Handy liegt der Geräteschlüssel im privaten App-Speicher (geschützt
+  durch die Sandbox des Systems), noch nicht im Schlüsselbund/Keystore.
 
 ## Fahrplan
 

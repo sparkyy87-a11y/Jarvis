@@ -15,6 +15,7 @@ use anyhow::bail;
 use jarvis_node::config::{BrainProvider, Config};
 use jarvis_node::host::Host;
 use jarvis_node::node::Node;
+use jarvis_node::trust::{Joining, TrustStore};
 use jarvis_node::{discovery, files, pairing};
 use jarvis_protocol::{Action, Command, Folder, Platform, Target};
 
@@ -101,10 +102,13 @@ pub fn pair(
 ) -> Result<PairingInfo, JarvisError> {
     let p = pairing::parse(&code)?;
     let platform = parse_platform(&platform)?;
-    // Bestehende Geräte-ID behalten, falls neu gekoppelt wird.
-    let mut cfg = Config::new(device_name, Some(p.key.clone()))?;
+    // Bei erneuter Kopplung Geräte-ID und -Schlüssel behalten: die anderen
+    // Geräte kennen sie schon.
+    let mut cfg = Config::new(device_name)?;
     if let Ok(old) = Config::load_from(&config_path(&data_dir)) {
         cfg.device.id = old.device.id;
+        cfg.device.private_key = old.device.private_key;
+        cfg.device.public_key = old.device.public_key;
     }
     cfg.device.platform = Some(platform);
     cfg.mesh.static_peers = p.addrs.clone();
@@ -114,6 +118,15 @@ pub fn pair(
     cfg.brain.provider = BrainProvider::Off;
     cfg.voice.enabled = false;
     cfg.save_to(&config_path(&data_dir))?;
+    // Die eigentliche Kopplung passiert beim ersten Kontakt: Einmal-Code und
+    // erwarteter Schlüssel des PCs (Schutz gegen ein Gerät dazwischen).
+    let mut trust = TrustStore::load(&cfg.trust_path())?;
+    trust.joining = Some(Joining {
+        token: p.token,
+        key: p.key,
+        name: p.name.clone(),
+    });
+    trust.save(&cfg.trust_path())?;
     Ok(PairingInfo {
         name: p.name,
         addresses: p.addrs,
@@ -123,6 +136,7 @@ pub fn pair(
 /// Kopplung löschen.
 #[uniffi::export]
 pub fn unpair(data_dir: String) {
+    let _ = std::fs::remove_file(PathBuf::from(&data_dir).join("trust.toml"));
     let _ = std::fs::remove_file(config_path(&data_dir));
 }
 
@@ -227,6 +241,16 @@ impl Jarvis {
 
     pub fn device_name(&self) -> String {
         self.node.me.name.clone()
+    }
+
+    /// Hinweis für die App, solange die Kopplung nicht abgeschlossen ist
+    /// (z. B. „Kopplungscode abgelaufen …"). `None`, wenn alles gut ist.
+    pub fn status(&self) -> Option<String> {
+        self.node.pairing_problem().or_else(|| {
+            self.node
+                .pairing_pending()
+                .then(|| "Kopplung läuft – PC und Handy müssen im selben WLAN sein.".to_string())
+        })
     }
 }
 
@@ -374,8 +398,9 @@ mod tests {
 
     fn code() -> String {
         format!(
-            "jarvis://pair?v=1&key={}&name=Gaming-PC&addr=127.0.0.1:1",
-            "ab".repeat(32)
+            "jarvis://pair?v=2&key={}&token={}&name=Gaming-PC&addr=127.0.0.1:1",
+            "ab".repeat(32),
+            "cd".repeat(16)
         )
     }
 

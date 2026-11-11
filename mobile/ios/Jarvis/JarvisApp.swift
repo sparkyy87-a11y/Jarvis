@@ -8,8 +8,9 @@ struct JarvisMain: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
-                // QR-Code von `jarvisd pair`: jarvis://pair?…
-                .onOpenURL { url in model.connect(code: url.absoluteString) }
+                // QR-Code von `jarvisd pair`: jarvis://pair?… – füllt nur das Formular vor.
+                // Gekoppelt wird erst nach Bestätigung (Schutz vor fremden Links).
+                .onOpenURL { url in if !model.paired { model.pendingCode = url.absoluteString } }
         }
     }
 }

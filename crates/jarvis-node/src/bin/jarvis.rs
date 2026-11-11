@@ -9,20 +9,36 @@ use std::io::{BufRead, Write};
 
 use anyhow::{Context, Result};
 use jarvis_node::config::{Config, DEFAULT_CONTROL_PORT};
-use jarvis_node::control::{Request, Response};
+use jarvis_node::control::{self, Request, Response};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let port = Config::load()
+    let cfg = Config::load().ok();
+    let port = cfg
+        .as_ref()
         .map(|c| c.mesh.control_port)
         .unwrap_or(DEFAULT_CONTROL_PORT);
+    let token_path = cfg
+        .map(|c| c.control_token_path())
+        .context("Jarvis ist nicht eingerichtet – zuerst `jarvisd init`")?;
+    let token = control::read_token(&token_path).context("Zugangs-Token fehlt – läuft jarvisd?")?;
     let stream = TcpStream::connect(("127.0.0.1", port))
         .await
         .context("jarvisd läuft nicht – zuerst `jarvisd` starten")?;
     let (r, mut w) = stream.into_split();
     let mut lines = BufReader::new(r).lines();
+    let mut auth = serde_json::to_string(&Request::Auth { token })?;
+    auth.push('\n');
+    w.write_all(auth.as_bytes()).await?;
+    let answer: Response = serde_json::from_str(
+        &lines
+            .next_line()
+            .await?
+            .context("jarvisd hat die Verbindung beendet")?,
+    )?;
+    anyhow::ensure!(answer.ok, "Zugang verweigert");
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {

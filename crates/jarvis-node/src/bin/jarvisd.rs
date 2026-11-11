@@ -3,7 +3,9 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use jarvis_node::config::Config;
+use jarvis_node::control::Request;
 use jarvis_node::node::Node;
+use jarvis_node::trust::{Joining, TrustStore};
 use jarvis_node::{control, discovery};
 use tracing::error;
 
@@ -18,22 +20,24 @@ struct Cli {
 enum Cmd {
     /// Dienst starten (Standard).
     Run,
-    /// Erstes Gerät einrichten: erzeugt Konfiguration und Pairing-Schlüssel.
+    /// Erstes Gerät einrichten (eigener Geräteschlüssel wird erzeugt).
     Init {
-        /// Name dieses Geräts, z. B. "Gaming-PC".
+        /// Name dieses Geräts, z. B. "Gaming-PC" oder "Laptop".
         #[arg(long)]
         name: Option<String>,
     },
-    /// Weiteres Gerät einrichten mit dem Schlüssel des ersten Geräts.
+    /// Dieses Gerät mit einem vorhandenen Jarvis koppeln (Code aus `jarvisd pair`).
     Join {
-        key: String,
+        code: String,
         #[arg(long)]
         name: Option<String>,
     },
-    /// Pairing-Schlüssel anzeigen (für `jarvisd join` auf anderen Geräten).
-    Key,
-    /// QR-Code zum Koppeln von iPhone/Android anzeigen.
+    /// Einmal-Code und QR-Code zum Koppeln eines weiteren Geräts anzeigen.
     Pair,
+    /// Alle gekoppelten Geräte anzeigen (auch offline).
+    Geraete,
+    /// Ein Gerät dauerhaft sperren (verloren, verkauft …).
+    Entfernen { name: String },
     /// Jarvis beim Anmelden automatisch starten: an, aus oder status.
     Autostart {
         #[arg(value_enum, default_value = "status")]
@@ -58,21 +62,46 @@ async fn main() -> Result<()> {
         .init();
 
     match Cli::parse().cmd.unwrap_or(Cmd::Run) {
-        Cmd::Init { name } => setup(name, None),
-        Cmd::Join { key, name } => setup(name, Some(key)),
-        Cmd::Key => {
-            println!("{}", Config::load()?.mesh.pairing_key);
-            Ok(())
-        }
+        Cmd::Init { name } => init(name),
+        Cmd::Join { code, name } => join(&code, name),
         Cmd::Run => run().await,
         Cmd::Autostart { mode } => autostart_cmd(mode),
         Cmd::Pair => pair(),
+        Cmd::Geraete => {
+            let resp = ask(&Request::Trusted)?;
+            for d in resp.trusted.unwrap_or_default() {
+                println!(
+                    "• {}{}",
+                    d.name,
+                    if d.online { "  (verbunden)" } else { "" }
+                );
+            }
+            Ok(())
+        }
+        Cmd::Entfernen { name } => {
+            let resp = ask(&Request::Revoke { name })?;
+            println!("{}", resp.text.unwrap_or_default());
+            Ok(())
+        }
     }
+}
+
+/// Anfrage an den laufenden Dienst.
+fn ask(req: &Request) -> Result<jarvis_node::control::Response> {
+    let cfg = Config::load()?;
+    control::request_blocking(cfg.mesh.control_port, &cfg.control_token_path(), req)
 }
 
 fn pair() -> Result<()> {
     let cfg = Config::load()?;
-    let link = jarvis_node::pairing::link_for(&cfg);
+    let resp = ask(&Request::Pair { addrs: None })?;
+    let Some(link) = resp.link else {
+        bail!(
+            "{}",
+            resp.text
+                .unwrap_or_else(|| "Kein Kopplungscode erhalten".into())
+        );
+    };
     let qr = qrcode::QrCode::new(link.as_bytes())?;
     let art = qr
         .render::<qrcode::render::unicode::Dense1x2>()
@@ -85,8 +114,8 @@ fn pair() -> Result<()> {
         "Mit der Handykamera scannen – die Jarvis-App öffnet sich und koppelt sich mit „{}“.",
         cfg.device.name
     );
-    println!("Oder diesen Code in der App einfügen:\n{link}\n");
-    println!("Achtung: Der Code enthält den Pairing-Schlüssel – nicht weitergeben.");
+    println!("Auf einem PC/Laptop stattdessen ausführen:\n  jarvisd join \"{link}\"\n");
+    println!("Der Code gilt 10 Minuten und nur für ein Gerät.");
     Ok(())
 }
 
@@ -113,7 +142,7 @@ fn autostart_cmd(mode: AutostartMode) -> Result<()> {
     Ok(())
 }
 
-fn setup(name: Option<String>, key: Option<String>) -> Result<()> {
+fn init(name: Option<String>) -> Result<()> {
     let path = Config::path();
     if path.exists() {
         bail!(
@@ -122,17 +151,40 @@ fn setup(name: Option<String>, key: Option<String>) -> Result<()> {
         );
     }
     let name = name.unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string());
-    let joining = key.is_some();
-    let cfg = Config::new(name, key)?;
+    let mut cfg = Config::new(name)?;
     cfg.save()?;
     println!("Eingerichtet: „{}“ ({})", cfg.device.name, path.display());
-    if !joining {
-        println!(
-            "\nAuf jedem weiteren Gerät ausführen:\n  jarvisd join {}\n",
-            cfg.mesh.pairing_key
+    println!("\nWeitere Geräte koppeln: Dienst starten (`jarvisd` oder `jarvisd autostart an`),");
+    println!("dann `jarvisd pair` – zeigt einen QR-Code mit Einmal-Code.");
+    Ok(())
+}
+
+fn join(code: &str, name: Option<String>) -> Result<()> {
+    let path = Config::path();
+    if path.exists() {
+        bail!(
+            "{} existiert schon – zum Neu-Einrichten löschen",
+            path.display()
         );
-        println!("Den Schlüssel wie ein Passwort behandeln.");
     }
+    let p = jarvis_node::pairing::parse(code)?;
+    let name = name.unwrap_or_else(|| gethostname::gethostname().to_string_lossy().to_string());
+    let mut cfg = Config::new(name)?;
+    cfg.mesh.static_peers = p.addrs.clone();
+    cfg.save()?;
+    let trust = TrustStore {
+        joining: Some(Joining {
+            token: p.token,
+            key: p.key,
+            name: p.name.clone(),
+        }),
+        ..Default::default()
+    };
+    trust.save(&cfg.trust_path())?;
+    println!(
+        "Eingerichtet: „{}“. Beim nächsten Start von jarvisd koppelt es sich mit „{}“.",
+        cfg.device.name, p.name
+    );
     Ok(())
 }
 
@@ -142,7 +194,8 @@ async fn run() -> Result<()> {
 
     let mut tasks = tokio::task::JoinSet::new();
     tasks.spawn(node.clone().listen());
-    tasks.spawn(control::serve(node.clone(), cfg.mesh.control_port));
+    let token = control::load_or_create_token(&cfg.control_token_path())?;
+    tasks.spawn(control::serve(node.clone(), cfg.mesh.control_port, token));
     if cfg.mesh.mdns {
         tasks.spawn(discovery::run(node.clone(), cfg.mesh.port));
     }

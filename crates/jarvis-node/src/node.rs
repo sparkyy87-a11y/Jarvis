@@ -25,7 +25,8 @@ use crate::config::Config;
 use crate::events::{describe, HudEvent};
 use crate::files;
 use crate::host::{DesktopHost, Host};
-use crate::transport::SecureConn;
+use crate::transport::{Identity, SecureConn};
+use crate::trust::{Joining, TrustStore};
 
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -35,6 +36,8 @@ struct Peer {
     /// Welche Seite die Verbindung aufgebaut hat – entscheidet bei doppelten Verbindungen.
     initiator: Uuid,
     info: DeviceInfo,
+    /// Im Handshake bewiesener Geräteschlüssel (hex).
+    key: String,
     addr: SocketAddr,
     tx: mpsc::Sender<Frame>,
     /// Schließt die Verbindung, wenn sie durch eine bessere ersetzt wird.
@@ -76,7 +79,11 @@ type Pending = oneshot::Sender<(bool, String)>;
 pub struct Node {
     pub me: DeviceInfo,
     cfg: Config,
-    psk: [u8; 32],
+    identity: Identity,
+    trust: Mutex<TrustStore>,
+    trust_path: std::path::PathBuf,
+    /// Letztes Problem beim Koppeln (für die App-Anzeige).
+    pairing_problem: Mutex<Option<String>>,
     peers: Mutex<HashMap<Uuid, Peer>>,
     pending: Mutex<HashMap<Uuid, Pending>>,
     /// Feste Adresse -> Gerät, das dort zuletzt erreichbar war.
@@ -131,9 +138,13 @@ impl Node {
         if brain.is_some() {
             me.capabilities.push(Capability::Brain);
         }
+        let trust_path = cfg.trust_path();
         Ok(Arc::new(Self {
             me,
-            psk: cfg.pairing_key()?,
+            identity: cfg.identity()?,
+            trust: Mutex::new(TrustStore::load(&trust_path)?),
+            trust_path,
+            pairing_problem: Mutex::default(),
             cfg,
             peers: Mutex::default(),
             pending: Mutex::default(),
@@ -159,7 +170,7 @@ impl Node {
             let (stream, addr) = listener.accept().await?;
             let node = self.clone();
             tokio::spawn(async move {
-                match SecureConn::accept(stream, &node.psk).await {
+                match SecureConn::accept(stream, &node.identity).await {
                     Ok(conn) => {
                         if let Err(e) = node.run_connection(conn, addr, false, None).await {
                             debug!("Verbindung von {addr} beendet: {e:#}");
@@ -179,7 +190,7 @@ impl Node {
     ) -> Result<()> {
         let stream =
             tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr)).await??;
-        let conn = SecureConn::initiate(stream, &self.psk).await?;
+        let conn = SecureConn::initiate(stream, &self.identity).await?;
         self.run_connection(conn, addr, true, static_addr).await
     }
 
@@ -226,20 +237,57 @@ impl Node {
         initiated_by_me: bool,
         static_addr: Option<String>,
     ) -> Result<()> {
+        let key = conn.remote_key();
+        if key == self.identity.public_hex() {
+            bail!("Verbindung zu mir selbst");
+        }
+        if self.trust.lock().unwrap().is_revoked(&key) {
+            bail!("gesperrtes Gerät ({addr}) abgewiesen");
+        }
+        let known = self.trust.lock().unwrap().is_trusted(&key);
+        if !known {
+            self.pair_unknown(&mut conn, &key, initiated_by_me, addr)
+                .await?;
+        }
+
+        let (trusted, revoked) = {
+            let t = self.trust.lock().unwrap();
+            (t.entries(), t.revoked_keys())
+        };
         conn.send(&Frame::Hello {
             version: PROTOCOL_VERSION,
             device: self.me.clone(),
+            trusted,
+            revoked,
         })
         .await?;
-        let info = match conn.recv().await? {
-            Some(Frame::Hello { version, device }) if version == PROTOCOL_VERSION => device,
+        let (info, their_trusted, their_revoked) = match conn.recv().await? {
+            Some(Frame::Hello {
+                version,
+                device,
+                trusted,
+                revoked,
+            }) if version == PROTOCOL_VERSION => (device, trusted, revoked),
             Some(Frame::Hello { version, .. }) => {
-                bail!("Gerät spricht Protokoll v{version}, wir v{PROTOCOL_VERSION}")
+                bail!("Gerät spricht Protokoll v{version}, wir v{PROTOCOL_VERSION} – bitte alle Geräte aktualisieren")
             }
             _ => bail!("Kein Hello erhalten"),
         };
         if info.id == self.me.id {
             bail!("Verbindung zu mir selbst");
+        }
+        // Listen abgleichen: was das Gegenüber kennt bzw. gesperrt hat, übernehmen.
+        let newly_revoked = {
+            let mut t = self.trust.lock().unwrap();
+            t.add(&key, info.id, &info.name);
+            let own = self.identity.public_hex();
+            let newly = t.merge(&own, &their_trusted, &their_revoked);
+            let _ = t.save(&self.trust_path);
+            newly
+        };
+        self.disconnect_keys(&newly_revoked);
+        if newly_revoked.contains(&key) {
+            bail!("{} ist gesperrt", info.name);
         }
         if let Some(a) = static_addr {
             self.static_links.lock().unwrap().insert(a, info.id);
@@ -251,6 +299,7 @@ impl Node {
             conn_id: Uuid::new_v4(),
             initiator: if initiated_by_me { self.me.id } else { info.id },
             info: info.clone(),
+            key: key.clone(),
             addr,
             tx: tx.clone(),
             kill: kill.clone(),
@@ -296,6 +345,165 @@ impl Node {
         result
     }
 
+    /// Unbekanntes Gerät: nur mit gültigem Einmal-Code hinein (bzw. hinaus, wenn
+    /// wir selbst gerade koppeln und das Gegenüber den erwarteten Schlüssel hat).
+    async fn pair_unknown(
+        &self,
+        conn: &mut SecureConn,
+        key: &str,
+        initiated_by_me: bool,
+        addr: SocketAddr,
+    ) -> Result<()> {
+        if initiated_by_me {
+            let joining: Option<Joining> = self.trust.lock().unwrap().joining.clone();
+            let Some(j) = joining.filter(|j| j.key == key) else {
+                bail!("unbekanntes Gerät unter {addr} – nicht gekoppelt");
+            };
+            conn.send(&Frame::PairRequest {
+                token: j.token.clone(),
+                device: self.me.clone(),
+            })
+            .await?;
+            match conn.recv().await? {
+                Some(Frame::PairResult { ok: true, .. }) => {
+                    let mut t = self.trust.lock().unwrap();
+                    t.joining = None;
+                    t.save(&self.trust_path)?;
+                    *self.pairing_problem.lock().unwrap() = None;
+                    info!("Gekoppelt mit {}", j.name);
+                    Ok(())
+                }
+                Some(Frame::PairResult { ok: false, message }) => {
+                    *self.pairing_problem.lock().unwrap() = Some(message.clone());
+                    bail!("Kopplung abgelehnt: {message}")
+                }
+                _ => bail!("Kopplung: keine Antwort"),
+            }
+        } else {
+            let request = tokio::time::timeout(Duration::from_secs(10), conn.recv()).await;
+            let Ok(Ok(Some(Frame::PairRequest { token, device }))) = request else {
+                bail!("unbekanntes Gerät von {addr} abgewiesen");
+            };
+            let accepted = {
+                let mut t = self.trust.lock().unwrap();
+                let ok = t.take_invite(&token) && t.add(key, device.id, &device.name);
+                if ok {
+                    t.save(&self.trust_path)?;
+                }
+                ok
+            };
+            if !accepted {
+                let _ = conn
+                    .send(&Frame::PairResult {
+                        ok: false,
+                        message: "Kopplungscode ungültig oder abgelaufen – am PC neu `jarvisd pair` ausführen.".into(),
+                    })
+                    .await;
+                warn!("Kopplungsversuch von {addr} mit ungültigem Code abgewiesen");
+                bail!("ungültiger Kopplungscode");
+            }
+            conn.send(&Frame::PairResult {
+                ok: true,
+                message: format!("Willkommen bei {}", self.me.name),
+            })
+            .await?;
+            info!("Neues Gerät gekoppelt: {} ({addr})", device.name);
+            self.emit(HudEvent::Reply {
+                text: format!("Neues Gerät gekoppelt: {}", device.name),
+                ok: true,
+            });
+            Ok(())
+        }
+    }
+
+    /// Trennt Verbindungen zu (gerade gesperrten) Schlüsseln.
+    fn disconnect_keys(&self, keys: &[String]) {
+        if keys.is_empty() {
+            return;
+        }
+        let mut peers = self.peers.lock().unwrap();
+        peers.retain(|_, p| {
+            let drop = keys.contains(&p.key);
+            if drop {
+                p.kill.notify_one();
+            }
+            !drop
+        });
+    }
+
+    /// Neuer Einmal-Code; liefert den Kopplungslink für QR-Code bzw. App.
+    pub fn create_invite(&self, addrs: Option<Vec<String>>) -> Result<String> {
+        let mut t = self.trust.lock().unwrap();
+        let invite = t.new_invite();
+        t.save(&self.trust_path)?;
+        Ok(crate::pairing::link_for(&self.cfg, &invite.token, addrs))
+    }
+
+    /// Sperrt ein Gerät dauerhaft und gibt die Sperre an alle anderen weiter.
+    pub async fn revoke(&self, name: &str) -> Result<String> {
+        let wanted = name.trim().to_lowercase();
+        let (key, shown) = {
+            let mut t = self.trust.lock().unwrap();
+            let Some((key, d)) = t
+                .devices
+                .iter()
+                .find(|(_, d)| d.name.to_lowercase() == wanted)
+                .map(|(k, d)| (k.clone(), d.clone()))
+            else {
+                bail!("Kein gekoppeltes Gerät heißt „{name}“.");
+            };
+            t.revoke(&key);
+            t.save(&self.trust_path)?;
+            (key, d.name)
+        };
+        self.disconnect_keys(std::slice::from_ref(&key));
+        let others: Vec<Peer> = self.peers.lock().unwrap().values().cloned().collect();
+        for p in others {
+            let _ = p.tx.send(Frame::Revoke { key: key.clone() }).await;
+        }
+        Ok(format!(
+            "{shown} ist gesperrt und kann sich nicht mehr verbinden."
+        ))
+    }
+
+    /// Alle gekoppelten Geräte (auch offline), Name -> verbunden?
+    pub fn trusted_devices(&self) -> Vec<(String, bool)> {
+        let connected: Vec<String> = self
+            .peers
+            .lock()
+            .unwrap()
+            .values()
+            .map(|p| p.key.clone())
+            .collect();
+        let mut list: Vec<(String, bool)> = self
+            .trust
+            .lock()
+            .unwrap()
+            .devices
+            .iter()
+            .map(|(k, d)| (d.name.clone(), connected.contains(k)))
+            .collect();
+        list.sort();
+        list
+    }
+
+    pub fn public_key(&self) -> String {
+        self.identity.public_hex()
+    }
+
+    pub fn is_trusted_key(&self, key: &str) -> bool {
+        self.trust.lock().unwrap().is_trusted(key)
+    }
+
+    pub fn pairing_problem(&self) -> Option<String> {
+        self.pairing_problem.lock().unwrap().clone()
+    }
+
+    /// Ist dieses Gerät mit mindestens einem anderen gekoppelt bzw. dabei?
+    pub fn pairing_pending(&self) -> bool {
+        self.trust.lock().unwrap().joining.is_some()
+    }
+
     /// Trägt ein Gerät ein. Bestehen zwei Verbindungen zum selben Gerät, gewinnt
     /// auf beiden Seiten diejenige, die das Gerät mit der kleineren ID aufgebaut hat.
     fn register(&self, peer: Peer) -> bool {
@@ -328,7 +536,23 @@ impl Node {
         };
         match frame {
             Frame::Ping => Some(Frame::Pong),
-            Frame::Pong | Frame::Hello { .. } => None,
+            Frame::Pong
+            | Frame::Hello { .. }
+            | Frame::PairRequest { .. }
+            | Frame::PairResult { .. } => None,
+            Frame::Revoke { key } => {
+                if key != self.identity.public_hex() {
+                    let name = {
+                        let mut t = self.trust.lock().unwrap();
+                        let name = t.revoke(&key);
+                        let _ = t.save(&self.trust_path);
+                        name
+                    };
+                    warn!("{from} hat {} gesperrt", name.unwrap_or_default());
+                    self.disconnect_keys(std::slice::from_ref(&key));
+                }
+                None
+            }
             Frame::Interpret { id, text, here } => {
                 let tx = tx.clone();
                 tokio::spawn(async move {
@@ -673,6 +897,25 @@ impl Node {
         if let Some(p) = peers.iter().find(|p| exact(&p.info)) {
             return Ok(Resolved::Remote(p.clone()));
         }
+        // Name enthält das Wort („am PC" -> „Gaming-PC", „am iPad" -> „iPad Büro"):
+        // bei genau einem Treffer gewinnt dieses Gerät vor den Gattungsnamen.
+        let words = |n: &str| -> Vec<String> {
+            n.to_lowercase()
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .map(String::from)
+                .collect()
+        };
+        let named: Vec<&Peer> = peers
+            .iter()
+            .filter(|p| words(&p.info.name).contains(&name))
+            .collect();
+        let me_named = words(&self.me.name).contains(&name);
+        match (named.as_slice(), me_named) {
+            ([one], false) => return Ok(Resolved::Remote((*one).clone())),
+            ([], true) => return Ok(Resolved::Here),
+            _ => {}
+        }
         // Gattungsnamen ("pc", "ipad"): eindeutig nur, wenn genau ein anderes
         // Gerät passt. Sagt man am PC "am PC", ist dieser PC gemeint.
         let generic: Vec<&Peer> = peers
@@ -844,6 +1087,13 @@ struct Incoming {
 
 impl Incoming {
     async fn start(name: &str, size: u64, dir: Result<PathBuf>) -> Result<Self> {
+        if size > files::MAX_RECEIVE_BYTES {
+            bail!(
+                "Datei zu groß ({} MB, höchstens {} MB)",
+                size >> 20,
+                files::MAX_RECEIVE_BYTES >> 20
+            );
+        }
         let name = files::safe_file_name(name)?;
         let dir = dir?;
         tokio::fs::create_dir_all(&dir).await?;
@@ -880,6 +1130,7 @@ impl Incoming {
         }
         let target = files::unique_path(&self.dir, &self.name);
         tokio::fs::rename(&self.part, &target).await?;
+        files::mark_as_downloaded(&target);
         Ok(target)
     }
 }

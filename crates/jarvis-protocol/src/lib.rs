@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Version des Drahtprotokolls. Wird im `Hello` ausgetauscht.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 /// Größe eines Datei-Chunks. Muss zusammen mit dem Frame-Overhead unter die
 /// Noise-Grenze von 65 535 Byte pro Nachricht passen.
@@ -228,12 +228,37 @@ pub struct Command {
     pub target: Target,
 }
 
+/// Ein vertrauenswürdiges Gerät: öffentlicher Schlüssel (hex), ID, Name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustEntry {
+    pub key: String,
+    pub id: Uuid,
+    pub name: String,
+}
+
 /// Eine Nachricht zwischen zwei verbundenen Geräten.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Frame {
+    /// Nach dem Handshake: wer ich bin und wem ich vertraue bzw. wen ich gesperrt
+    /// habe (Abgleich zwischen vertrauenswürdigen Geräten).
     Hello {
         version: u16,
         device: DeviceInfo,
+        trusted: Vec<TrustEntry>,
+        revoked: Vec<String>,
+    },
+    /// Neues Gerät stellt sich mit dem Einmal-Code aus `jarvisd pair` vor.
+    PairRequest {
+        token: String,
+        device: DeviceInfo,
+    },
+    PairResult {
+        ok: bool,
+        message: String,
+    },
+    /// Gerät mit diesem Schlüssel ist gesperrt (verloren, verkauft …).
+    Revoke {
+        key: String,
     },
     Execute {
         id: Uuid,

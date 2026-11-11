@@ -132,6 +132,25 @@ pub fn resolve_folder(folder: Option<&Folder>) -> Result<PathBuf> {
     }
 }
 
+/// Größte Datei, die Jarvis annimmt (schützt vor vollgeschriebener Festplatte).
+pub const MAX_RECEIVE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
+/// Kennzeichnet eine empfangene Datei wie einen Download aus dem Internet
+/// („Mark of the Web"): Windows warnt dann vor dem Ausführen (SmartScreen).
+pub fn mark_as_downloaded(path: &Path) {
+    #[cfg(windows)]
+    {
+        let mut ads = path.as_os_str().to_owned();
+        ads.push(":Zone.Identifier");
+        let _ = std::fs::write(
+            ads,
+            "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=jarvis://\r\n",
+        );
+    }
+    #[cfg(not(windows))]
+    let _ = path;
+}
+
 /// Nur der reine Dateiname – verhindert, dass ein Sender Pfade wie
 /// `../../autostart/x.exe` unterschiebt.
 pub fn safe_file_name(name: &str) -> Result<String> {
