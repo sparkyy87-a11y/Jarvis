@@ -125,7 +125,7 @@ impl Brain {
         if !status.is_success() {
             let msg = value["error"].as_str().unwrap_or("unbekannt");
             if msg.contains("not found") {
-                bail!("Modell fehlt – einmalig `ollama pull {model}` ausführen");
+                bail!("Modell fehlt – einmalig `ollama pull {model}` ausführen (Ollama unter {url} meldet: {msg})");
             }
             bail!("Ollama-Fehler {status}: {msg}");
         }
