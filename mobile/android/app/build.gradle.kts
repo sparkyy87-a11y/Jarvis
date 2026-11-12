@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "de.jarvis.app"
+    namespace = "de.mira.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "de.jarvis.app"
+        applicationId = "de.mira.app"
         minSdk = 29
         targetSdk = 36
         versionCode = 1
@@ -41,21 +41,21 @@ kotlin {
     compilerOptions { jvmTarget.set(JvmTarget.JVM_17) }
 }
 
-// Rust-Kern (jarvis-mobile) für Android bauen und Kotlin-Anbindung erzeugen.
+// Rust-Kern (mira-mobile) für Android bauen und Kotlin-Anbindung erzeugen.
 val repoRoot = rootDir.resolve("../..")
 val buildRust by tasks.registering(Exec::class) {
-    group = "jarvis"
-    description = "Baut libjarvis_mobile.so und die Kotlin-Anbindung (UniFFI)"
+    group = "mira"
+    description = "Baut libmira_mobile.so und die Kotlin-Anbindung (UniFFI)"
     workingDir = repoRoot
     val out = layout.buildDirectory.get().asFile
     commandLine(
         "bash", "-c",
         """
         set -e
-        cargo ndk -t arm64-v8a -t x86_64 -o "${out}/generated/jniLibs" build --release -p jarvis-mobile
+        cargo ndk -t arm64-v8a -t x86_64 -o "${out}/generated/jniLibs" build --release -p mira-mobile
         # Anbindung aus einem ungestrippten Host-Build erzeugen (Metadaten sind plattformunabhängig).
-        cargo build -q -p jarvis-mobile --lib
-        lib=$(ls target/debug/libjarvis_mobile.so target/debug/libjarvis_mobile.dylib 2>/dev/null | head -1)
+        cargo build -q -p mira-mobile --lib
+        lib=$(ls target/debug/libmira_mobile.so target/debug/libmira_mobile.dylib 2>/dev/null | head -1)
         cargo run -q -p uniffi-bindgen -- generate --library "${'$'}lib" \
           --language kotlin --out-dir "${out}/generated/uniffi" --no-format
         """.trimIndent(),

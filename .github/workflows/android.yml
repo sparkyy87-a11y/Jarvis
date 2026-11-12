@@ -1,5 +1,5 @@
 # Baut die Android-App (APK zum Herunterladen) und prüft die Kotlin-Anbindung
-# gegen einen echt laufenden jarvisd.
+# gegen einen echt laufenden mirad.
 name: Android
 
 on:
@@ -24,7 +24,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: cargo-ndk
         run: cargo install cargo-ndk --locked
-      - name: Kotlin-Anbindung gegen echten jarvisd testen
+      - name: Kotlin-Anbindung gegen echten mirad testen
         working-directory: mobile/android
         run: ./gradlew :bindings-test:test --console=plain
       - name: APK bauen
@@ -32,5 +32,5 @@ jobs:
         run: ./gradlew :app:assembleRelease --console=plain
       - uses: actions/upload-artifact@v4
         with:
-          name: jarvis-android-apk
+          name: mira-android-apk
           path: mobile/android/app/build/outputs/apk/release/app-release.apk

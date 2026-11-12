@@ -1,5 +1,5 @@
 # Baut alles, was man zum Installieren braucht:
-#   Windows-Installer (Jarvis-Setup-x.y.z.exe), Android-APK, iPhone/iPad-IPA (unsigniert).
+#   Windows-Installer (Mira-Setup-x.y.z.exe), Android-APK, iPhone/iPad-IPA (unsigniert).
 # Ein Tag „v…" (z. B. v0.2.0) veröffentlicht sie zusätzlich als GitHub-Release.
 name: Release
 
@@ -23,19 +23,19 @@ jobs:
         env:
           RUSTFLAGS: -C target-feature=+crt-static
         # --target trennt Build-Skripte (Host) von den Programmen (statisch)
-        run: cargo build --release --target x86_64-pc-windows-msvc -p jarvis-node -p jarvis-voice -p jarvis-hud -p jarvis-settings
+        run: cargo build --release --target x86_64-pc-windows-msvc -p mira-node -p mira-voice -p mira-hud -p mira-settings
       - name: Installer bauen (Inno Setup)
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          $ver = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq 'jarvis-node').version
-          & $iscc "/DAppVersion=$ver" "/DBinDir=..\..\target\x86_64-pc-windows-msvc\release" installer\windows\jarvis.iss
+          $ver = ((cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object name -eq 'mira-node').version
+          & $iscc "/DAppVersion=$ver" "/DBinDir=..\..\target\x86_64-pc-windows-msvc\release" installer\windows\mira.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist
       - uses: actions/upload-artifact@v4
         with:
-          name: jarvis-windows-installer
+          name: mira-windows-installer
           path: dist/*.exe
 
   android:
@@ -58,8 +58,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           cd out
-          mv jarvis-android-apk/app-release.apk "Jarvis-Android-${GITHUB_REF_NAME}.apk"
-          mv jarvis-ios-unsigned-ipa/Jarvis-unsigned.ipa "Jarvis-iOS-${GITHUB_REF_NAME}-unsigniert.ipa"
-          sha256sum *.apk *.ipa jarvis-windows-installer/*.exe > SHA256SUMS.txt
-          gh release create "$GITHUB_REF_NAME" --title "Jarvis ${GITHUB_REF_NAME}" --generate-notes \
-            jarvis-windows-installer/*.exe *.apk *.ipa SHA256SUMS.txt
+          mv mira-android-apk/app-release.apk "Mira-Android-${GITHUB_REF_NAME}.apk"
+          mv mira-ios-unsigned-ipa/Mira-unsigned.ipa "Mira-iOS-${GITHUB_REF_NAME}-unsigniert.ipa"
+          sha256sum *.apk *.ipa mira-windows-installer/*.exe > SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" --title "Mira ${GITHUB_REF_NAME}" --generate-notes \
+            mira-windows-installer/*.exe *.apk *.ipa SHA256SUMS.txt

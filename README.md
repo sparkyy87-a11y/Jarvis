@@ -1,7 +1,7 @@
-# Jarvis
+# Mira
 
 Ein KI-Assistent, der alle eigenen Geräte als *ein* System behandelt: Du sprichst
-mit dem Gerät, das gerade vor dir steht, und Jarvis führt den Befehl dort aus, wo
+mit dem Gerät, das gerade vor dir steht, und Mira führt den Befehl dort aus, wo
 er hingehört.
 
 ```text
@@ -10,7 +10,7 @@ am iPad:  „Sende Datei a an den PC in Ordner Dokumente"  → a.txt landet in P
 am Handy: „Beende Minecraft am PC"                       → beendet Minecraft auf dem PC
 ```
 
-Geschrieben in Rust: ein Dienst pro Gerät (`jarvisd`), schnelle lokale
+Geschrieben in Rust: ein Dienst pro Gerät (`mirad`), schnelle lokale
 Befehlserkennung und ein Sprachmodell (kostenlos lokal oder Claude) nur dann, wenn die
 Regeln einen Satz nicht verstehen.
 
@@ -26,9 +26,9 @@ Regeln einen Satz nicht verstehen.
 | Apps öffnen und schließen: Windows, macOS, Linux | ✅ |
 | Dateien senden, mit Prüfsumme, in bekannte Ordner | ✅ |
 | Sprachausgabe über die Systemstimme | ✅ |
-| Spracheingabe: „Jarvis, …" + Whisper lokal, optional auf der Grafikkarte | ✅ |
+| Spracheingabe: „Mira, …" + Whisper lokal, optional auf der Grafikkarte | ✅ |
 | Startet automatisch mit Windows/macOS/Linux, ohne Fenster | ✅ |
-| HUD: leuchtender Ring, der sich beim Sprechen mit Jarvis einblendet | ✅ |
+| HUD: leuchtender Ring, der sich beim Sprechen mit Mira einblendet | ✅ |
 | Google-Suche und Musik (Apple Music, Spotify, YouTube Music) | ✅ |
 | Computer Use (Claude bedient den Bildschirm) | Phase 3 |
 | Apps für Android, iPhone und iPad (Mikrofon-Taste, Dateien, Kopplung per QR-Code) | ✅ |
@@ -36,17 +36,17 @@ Regeln einen Satz nicht verstehen.
 
 ## Installation
 
-**Windows (PC, Laptop):** `Jarvis-Setup-….exe` aus dem neuesten Release bzw.
+**Windows (PC, Laptop):** `Mira-Setup-….exe` aus dem neuesten Release bzw.
 *Actions › Release › Artifacts* starten. Der Installer
 - braucht keine Adminrechte und keine weiteren Programme,
 - fragt nach dem Gerätenamen und ob es das erste Gerät ist oder gekoppelt wird,
 - installiert auf Wunsch das kostenlose Sprachmodell (Ollama) – nur auf *einem*
   Gerät nötig, die anderen fragen dieses –,
 - lädt die Spracherkennung vorab, gibt auf Wunsch die Firewall **nur fürs
-  Heimnetz** frei und startet Jarvis bei jeder Anmeldung.
+  Heimnetz** frei und startet Mira bei jeder Anmeldung.
 
-Reihenfolge: zuerst den PC („erstes Gerät"), danach **„Jarvis, verbinde dich mit
-einem neuen Gerät"** sagen (oder Startmenü › Jarvis-Einstellungen › Geräte) – das
+Reihenfolge: zuerst den PC („erstes Gerät"), danach **„Mira, verbinde dich mit
+einem neuen Gerät"** sagen (oder Startmenü › Mira-Einstellungen › Geräte) – das
 zeigt einen QR-Code mit Einmal-Code für das nächste Gerät:
 Laptop (Code in den Installer einfügen), Handy und iPads (QR-Code mit der Kamera
 scannen). Für jedes weitere Gerät einen neuen Code holen.
@@ -55,43 +55,43 @@ Windows zeigt beim ersten Start des Installers eventuell „Unbekannter
 Herausgeber" (SmartScreen), weil er nicht mit einem kostenpflichtigen
 Zertifikat signiert ist: *Weitere Informationen › Trotzdem ausführen*.
 
-**Android:** `Jarvis-Android-….apk` aus dem Release öffnen. **iPhone/iPad:** siehe
+**Android:** `Mira-Android-….apk` aus dem Release öffnen. **iPhone/iPad:** siehe
 [Handy und Tablet](#handy-und-tablet).
 
 ## Selbst bauen
 
 ```bash
-git clone https://github.com/sparkyy87-a11y/Jarvis.git && cd Jarvis
+git clone https://github.com/sparkyy87-a11y/Mira.git && cd Mira
 cargo build --release          # Programme liegen danach in target/release/
 
 # Erstes Gerät = Hauptgerät (das Gerät, das DU benutzt, z. B. dein Laptop)
-jarvisd init --name Laptop
-jarvisd autostart an           # Dienst starten (und bei jeder Anmeldung)
-jarvisd pair                   # QR-Code + Einmal-Code für das nächste Gerät
+mirad init --name Laptop
+mirad autostart an           # Dienst starten (und bei jeder Anmeldung)
+mirad pair                   # QR-Code + Einmal-Code für das nächste Gerät
 
-# Weiterer PC: den Befehl aus `jarvisd pair` ausführen
-jarvisd join "jarvis://pair?…" --name PC
-jarvisd autostart an
+# Weiterer PC: den Befehl aus `mirad pair` ausführen
+mirad join "mira://pair?…" --name PC
+mirad autostart an
 # Handy/Tablet: QR-Code mit der Kamera scannen, Namen eingeben, bestätigen
 
-jarvisd geraete                # alle gekoppelten Geräte mit Rolle und Rechten
-jarvisd entfernen Handy        # verlorenes Gerät sperren            (nur Hauptgerät)
-jarvisd rechte PC --steuern nein --dateien nein                   # (nur Hauptgerät)
-jarvisd rechte iPhone --hauptgeraet ja   # iPhone darf auch den Laptop steuern
-jarvisd hauptgeraet iPad       # Hauptrolle abgeben                  (nur Hauptgerät)
+mirad geraete                # alle gekoppelten Geräte mit Rolle und Rechten
+mirad entfernen Handy        # verlorenes Gerät sperren            (nur Hauptgerät)
+mirad rechte PC --steuern nein --dateien nein                   # (nur Hauptgerät)
+mirad rechte iPhone --hauptgeraet ja   # iPhone darf auch den Laptop steuern
+mirad hauptgeraet iPad       # Hauptrolle abgeben                  (nur Hauptgerät)
 
 # Befehle geben (auf jedem Gerät)
-jarvis geräte
-jarvis öffne Minecraft
-jarvis sende Datei a an den Laptop in Ordner Dokumente
-jarvis                         # interaktiver Modus
+mira geräte
+mira öffne Minecraft
+mira sende Datei a an den Laptop in Ordner Dokumente
+mira                         # interaktiver Modus
 ```
 
 ## Kostenlos: lokales Sprachmodell
 
 Die eingebauten Befehle (öffnen, schließen, Datei senden, „sag …") brauchen gar
 kein Sprachmodell. Für freie Sätze („Mach mir Musik zum Arbeiten an") nutzt
-Jarvis standardmäßig ein **lokales Modell über [Ollama](https://ollama.com)** –
+Mira standardmäßig ein **lokales Modell über [Ollama](https://ollama.com)** –
 kostenlos, ohne Konto, die Sprache verlässt den Rechner nicht:
 
 ```bash
@@ -103,10 +103,10 @@ Ollama muss nur auf *einem* Gerät laufen, z. B. dem PC; andere Geräte zeigen m
 `ollama_url` darauf. Mit Grafikkarte ist ein größeres Modell (`qwen2.5:7b`) klüger.
 
 **Claude statt lokalem Modell:** Das kostenlose Claude-Abo auf claude.ai gilt nur
-für die Chat-Oberfläche; Programme wie Jarvis können es nicht verwenden. Wer
+für die Chat-Oberfläche; Programme wie Mira können es nicht verwenden. Wer
 Claude nutzen will, braucht einen API-Schlüssel von console.anthropic.com
 (Abrechnung nach Verbrauch) und setzt ihn als `ANTHROPIC_API_KEY`. Ist der
-Schlüssel gesetzt, nimmt Jarvis automatisch Claude.
+Schlüssel gesetzt, nimmt Mira automatisch Claude.
 
 **Windows:** Beim ersten Start fragt die Firewall nach Port 7879. Für das Heimnetz
 (privates Netzwerk) erlauben.
@@ -114,7 +114,7 @@ Schlüssel gesetzt, nimmt Jarvis automatisch Claude.
 ## Suchen und Musik
 
 ```text
-„Jarvis, google Wetter Berlin"            → Google-Suche im Browser
+„Mira, google Wetter Berlin"            → Google-Suche im Browser
 „Such nach Minecraft Mods am PC"          → … im Browser des PCs
 „Spiel Thunderstruck von AC/DC"            → Musikdienst (Standard: Apple Music)
 „Spiel Musik von Adele auf Spotify"        → bestimmter Dienst
@@ -141,20 +141,20 @@ service = "apple-music"   # oder "spotify", "youtube-music"
 
 ## HUD
 
-<img src="docs/hud.gif" width="300" align="right" alt="Jarvis-HUD">
+<img src="docs/hud.gif" width="300" align="right" alt="Mira-HUD">
 
-`jarvis-hud` blendet sich ein, sobald du mit Jarvis sprichst – ein leuchtender
+`mira-hud` blendet sich ein, sobald du mit Mira sprichst – ein leuchtender
 Ring mit Skalen und Segmenten, der
 
-- **mit deiner Stimme pulsiert**, solange Jarvis zuhört („HÖRE ZU"),
+- **mit deiner Stimme pulsiert**, solange Mira zuhört („HÖRE ZU"),
 - beim Nachdenken schneller rotiert („VERARBEITE"),
 - die Antwort Zeichen für Zeichen einblendet und beim Vorlesen mitschwingt,
 - bei Problemen bernsteinfarben wird,
 - auch Befehle und Dateien von anderen Geräten zeigt („Datei von iPhone").
 
 Danach blendet es sich aus. Das Fenster ist randlos, durchklickbar und immer
-im Vordergrund; es startet mit `jarvisd autostart an` automatisch mit.
-`jarvis-hud --demo` zeigt eine Vorführung ohne laufenden Jarvis.
+im Vordergrund; es startet mit `mirad autostart an` automatisch mit.
+`mira-hud --demo` zeigt eine Vorführung ohne laufenden Mira.
 
 ```toml
 [hud]
@@ -166,7 +166,7 @@ Eigener Entwurf im Stil eines Holo-Displays – keine Grafiken oder Logos aus Fi
 
 ## Einstellungen
 
-**Jarvis-Einstellungen** (Startmenü oder `jarvis-einstellungen`) – alles ohne
+**Mira-Einstellungen** (Startmenü oder `mira-einstellungen`) – alles ohne
 Konfigurationsdatei:
 
 - **Übersicht:** Gerätename, weitere Namen, Autostart, Neustart
@@ -179,22 +179,22 @@ Konfigurationsdatei:
 - **Musik & Apps:** Musikdienst, eigene Kurzbefehle („minecraft" → Programmpfad)
 - **HUD:** an/aus, Position, Vorschau
 
-„Speichern & übernehmen" startet Jarvis mit den neuen Einstellungen neu.
+„Speichern & übernehmen" startet Mira mit den neuen Einstellungen neu.
 
 ## Automatisch starten
 
 ```bash
-jarvisd autostart an       # jetzt starten und bei jeder Anmeldung, ohne Fenster
-jarvisd autostart status
-jarvisd autostart aus      # austragen und beenden
+mirad autostart an       # jetzt starten und bei jeder Anmeldung, ohne Fenster
+mirad autostart status
+mirad autostart aus      # austragen und beenden
 ```
 
-Dahinter steckt `jarvis-hintergrund`: Es startet `jarvisd` und `jarvis-listen`
+Dahinter steckt `mira-hintergrund`: Es startet `mirad` und `mira-listen`
 unsichtbar, startet sie nach einem Absturz neu und schreibt Logs nach
-`%LOCALAPPDATA%\jarvis\logs` (macOS/Linux: `~/.local/share/jarvis/logs` bzw.
-`~/Library/Application Support/jarvis/logs`). Eingetragen wird unter Windows
+`%LOCALAPPDATA%\mira\logs` (macOS/Linux: `~/.local/share/mira/logs` bzw.
+`~/Library/Application Support/mira/logs`). Eingetragen wird unter Windows
 der „Ausführen"-Schlüssel des Benutzers – keine Adminrechte nötig. Soll nur
-`jarvisd` ohne Spracheingabe starten: `enabled = false` unter `[voice]`.
+`mirad` ohne Spracheingabe starten: `enabled = false` unter `[voice]`.
 
 ## Handy und Tablet
 
@@ -202,18 +202,18 @@ Die Apps für **Android** (`mobile/android`) und **iPhone/iPad** (`mobile/ios`)
 nutzen denselben Rust-Kern wie der PC – gleiche Verschlüsselung, gleiche
 Befehle, gleiche Dateiübertragung.
 
-**Koppeln:** Am PC `jarvisd pair` ausführen und den QR-Code mit der normalen
-Kamera-App scannen. Jarvis öffnet sich und ist gekoppelt.
+**Koppeln:** Am PC `mirad pair` ausführen und den QR-Code mit der normalen
+Kamera-App scannen. Mira öffnet sich und ist gekoppelt.
 
 **Was geht:**
-- Der Jarvis-Ring ist die Mikrofon-Taste: antippen, sprechen – er pulsiert mit
+- Der Mira-Ring ist die Mikrofon-Taste: antippen, sprechen – er pulsiert mit
   deiner Stimme, dreht beim Nachdenken schneller und schwingt beim Vorlesen
 - Sprachbefehle: „Öffne Minecraft am PC", „Schick die Datei Bericht an mein Handy"
   – erkannt von der Spracherkennung des Handys (auf dem Gerät, kostenlos)
 - Freie Sätze deutet das Sprachmodell auf dem PC (Ollama) – das Handy fragt es einfach
-- Dateien senden: Büroklammer in der App, auf Android auch „Teilen → Jarvis"
+- Dateien senden: Büroklammer in der App, auf Android auch „Teilen → Mira"
 - Dateien empfangen: Android mit Benachrichtigung; iPhone in der Dateien-App
-  unter „Auf meinem iPhone › Jarvis"
+  unter „Auf meinem iPhone › Mira"
 - „Öffne Spotify am Handy": Android startet jede installierte App; iOS nur
   Apps mit bekanntem Link (Spotify, YouTube, WhatsApp, Netflix, Karten, …)
 
@@ -224,16 +224,16 @@ Sprachmodell und damit den PC (oder Claude mit API-Schlüssel). Voraussetzung:
 die Geräte waren einmal gleichzeitig mit dem PC verbunden, und auf dem iPad ist
 die App offen.
 
-**Grenzen der Systeme:** Ein Dauer-Weckwort („Jarvis" ohne Taste) erlauben
+**Grenzen der Systeme:** Ein Dauer-Weckwort („Mira" ohne Taste) erlauben
 Android und iOS fremden Apps nicht stromsparend – auf dem Handy gibt es deshalb
 die Mikrofon-Taste. Android bleibt über eine dezente Dauer-Benachrichtigung für
-den PC erreichbar; iOS hält Apps im Hintergrund an, auf dem iPhone ist Jarvis
+den PC erreichbar; iOS hält Apps im Hintergrund an, auf dem iPhone ist Mira
 also erreichbar, solange die App offen ist.
 
 ### Android installieren
 
 Die fertige APK baut GitHub bei jedem Push: **Actions › Android › neuester Lauf ›
-Artifacts › jarvis-android-apk**. Auf dem Handy öffnen und „Installation aus
+Artifacts › mira-android-apk**. Auf dem Handy öffnen und „Installation aus
 unbekannten Quellen" für den Browser/Dateimanager erlauben.
 
 Selbst bauen: Android SDK + NDK, `cargo install cargo-ndk`, dann
@@ -243,7 +243,7 @@ Selbst bauen: Android SDK + NDK, `cargo install cargo-ndk`, dann
 
 Apple lässt Apps außerhalb des App Stores nur signiert auf Geräte. Wege:
 - **Mit Mac:** `mobile/ios/build-rust.sh`, dann `cd mobile/ios && xcodegen`,
-  `Jarvis.xcodeproj` öffnen, unter *Signing* die eigene Apple-ID wählen und aufs
+  `Mira.xcodeproj` öffnen, unter *Signing* die eigene Apple-ID wählen und aufs
   iPhone spielen. Mit kostenloser Apple-ID läuft die App 7 Tage, dann neu aufspielen.
 - **Ohne Mac (Windows):** Die unsignierte `.ipa` aus **Actions › iOS › Artifacts**
   mit [Sideloadly](https://sideloadly.io) oder AltStore und der eigenen Apple-ID
@@ -252,16 +252,16 @@ Apple lässt Apps außerhalb des App Stores nur signiert auf Geräte. Wege:
 
 ## Spracheingabe
 
-`jarvis-listen` hört über das Mikrofon zu und reagiert auf „Jarvis":
+`mira-listen` hört über das Mikrofon zu und reagiert auf „Mira":
 
 ```text
-„Jarvis, öffne Minecraft."                    → sofort ausgeführt
-„Jarvis."  –  „Ja?"  –  „Sende Datei a an …"   → Befehl nach kurzer Pause
+„Mira, öffne Minecraft."                    → sofort ausgeführt
+„Mira."  –  „Ja?"  –  „Sende Datei a an …"   → Befehl nach kurzer Pause
 „Wie war dein Tag?"                          → ignoriert (kein Weckwort)
 ```
 
 Alles läuft lokal: Silero erkennt, *wann* gesprochen wird, Whisper schreibt mit,
-danach geht der Text an `jarvisd` wie bei der Tastatureingabe. Beim ersten Start
+danach geht der Text an `mirad` wie bei der Tastatureingabe. Beim ersten Start
 werden die Modelle geladen (einmalig).
 
 | Gerät | Modell (Standard) | Erkennungszeit pro Befehl |
@@ -270,9 +270,9 @@ werden die Modelle geladen (einmalig).
 | nur Prozessor | `small-q5_1` (~190 MB) | ca. 0,4–1 s auf einem 4-Kern-Rechner |
 
 ```bash
-jarvis-listen                  # zuhören
-jarvis-listen --mikrofone      # Mikrofone anzeigen, dann in der Config wählen
-jarvis-listen --datei test.wav --trocken   # Aufnahme testen, nichts ausführen
+mira-listen                  # zuhören
+mira-listen --mikrofone      # Mikrofone anzeigen, dann in der Config wählen
+mira-listen --datei test.wav --trocken   # Aufnahme testen, nichts ausführen
 ```
 
 ### Windows mit NVIDIA-Grafikkarte
@@ -284,7 +284,7 @@ gleichzeitig im Grafikspeicher (11 GB).
 1. Visual Studio Build Tools mit „Desktopentwicklung mit C++"
 2. `winget install Kitware.CMake LLVM.LLVM`
 3. **CUDA Toolkit 12.x** – nicht 13, das unterstützt GTX-10xx-Karten nicht mehr
-4. Neues Terminal, dann im Jarvis-Ordner:
+4. Neues Terminal, dann im Mira-Ordner:
 
 ```powershell
 .\scripts\build-windows.ps1     # baut mit CUDA für GTX 10xx; -CudaArch 86 für RTX 30xx
@@ -295,8 +295,8 @@ In der Config dann `model = "qwen2.5:7b"` unter `[brain]` eintragen.
 
 ## Konfiguration
 
-`%APPDATA%\jarvis\config.toml` (Windows), `~/Library/Application Support/jarvis/config.toml`
-(macOS), `~/.config/jarvis/config.toml` (Linux):
+`%APPDATA%\mira\config.toml` (Windows), `~/Library/Application Support/mira/config.toml`
+(macOS), `~/.config/mira/config.toml` (Linux):
 
 ```toml
 [device]
@@ -315,11 +315,11 @@ minecraft = 'C:\XboxGames\Minecraft Launcher\Content\Minecraft.exe'
 [voice]
 enabled = true                     # beim Autostart mitstarten
 language = "de"
-wake_words = ["jarvis"]
+wake_words = ["mira"]
 # input_device = "USB"             # Teil des Mikrofonnamens
 # model = "large-v3-turbo"         # Whisper-Modell
 speak_replies = true
-follow_up_seconds = 8              # so lange wartet Jarvis nach „Jarvis." auf den Befehl
+follow_up_seconds = 8              # so lange wartet Mira nach „Mira." auf den Befehl
 
 [brain]
 provider = "auto"                  # auto | ollama | claude | off
@@ -330,30 +330,30 @@ provider = "auto"                  # auto | ollama | claude | off
 ## Architektur
 
 ```text
-                    ┌──────────────── jarvisd (pro Gerät) ────────────────┐
- jarvis-listen ─►  │ control ──► jarvis-intent ──(nicht erkannt)──► brain │ ──► Ollama/Claude
+                    ┌──────────────── mirad (pro Gerät) ────────────────┐
+ mira-listen ─►  │ control ──► mira-intent ──(nicht erkannt)──► brain │ ──► Ollama/Claude
  (127.0.0.1:7878)   │                 │                                    │
                     │                 ▼                                    │
                     │            node::run ── hier? ──► exec / files       │
                     │                 │                                    │
-                    │                 └─ anderes Gerät ──► transport ──────┼──► jarvisd (PC, iPad …)
+                    │                 └─ anderes Gerät ──► transport ──────┼──► mirad (PC, iPad …)
                     └──────────────────────────────────────────────────────┘
                                          ▲ discovery (mDNS)
 ```
 
 | Crate | Aufgabe |
 |---|---|
-| `jarvis-protocol` | Gemeinsame Typen (`Action`, `Command`, `Frame`), Binärformat (postcard) |
-| `jarvis-intent` | Regelbasierte Befehlserkennung DE/EN, inkl. Zielgerät („am PC", „aufs Handy") |
-| `jarvis-brain` | Sprachmodell für freie Sätze: Ollama (lokal) oder Claude, festes JSON-Schema |
-| `jarvis-node` | `jarvisd` und `jarvis`: Mesh, Routing, Ausführung, Dateiübertragung |
-| `jarvis-voice` | `jarvis-listen`: Mikrofon, Silero-VAD, Whisper, Weckwort |
-| `jarvis-hud` | Overlay (egui): zeigt Zuhören, Nachdenken, Antworten |
-| `jarvis-mobile` | Kern für die Handy-Apps (UniFFI → Kotlin/Swift) |
+| `mira-protocol` | Gemeinsame Typen (`Action`, `Command`, `Frame`), Binärformat (postcard) |
+| `mira-intent` | Regelbasierte Befehlserkennung DE/EN, inkl. Zielgerät („am PC", „aufs Handy") |
+| `mira-brain` | Sprachmodell für freie Sätze: Ollama (lokal) oder Claude, festes JSON-Schema |
+| `mira-node` | `mirad` und `mira`: Mesh, Routing, Ausführung, Dateiübertragung |
+| `mira-voice` | `mira-listen`: Mikrofon, Silero-VAD, Whisper, Weckwort |
+| `mira-hud` | Overlay (egui): zeigt Zuhören, Nachdenken, Antworten |
+| `mira-mobile` | Kern für die Handy-Apps (UniFFI → Kotlin/Swift) |
 | `mobile/android` | Android-App (Kotlin, Jetpack Compose) |
 | `mobile/ios` | iPhone/iPad-App (SwiftUI) |
 
-**Warum so schnell:** Die häufigen Befehle erkennt `jarvis-intent` per Regex in
+**Warum so schnell:** Die häufigen Befehle erkennt `mira-intent` per Regex in
 Mikrosekunden, ohne Netz. Die Geräte halten eine dauerhafte, verschlüsselte
 TCP-Verbindung offen; ein Befehl an den PC ist ein einziges kleines Paket. Das
 Sprachmodell wird nur für Sätze gefragt, die die Regeln nicht kennen.
@@ -361,7 +361,7 @@ Sprachmodell wird nur für Sätze gefragt, die die Regeln nicht kennen.
 **Wie ein Zielgerät gefunden wird:** Erst exakter Name oder Alias, dann ein
 Gerät, dessen Name das Wort enthält („am PC" → „Gaming-PC", „am iPad" → „iPad
 Büro"), zuletzt der Gattungsname („PC", „iPad", „Handy"). Passen zwei Geräte,
-fragt Jarvis nach, statt zu raten – bei zwei iPads also am besten „iPad
+fragt Mira nach, statt zu raten – bei zwei iPads also am besten „iPad
 Wohnzimmer" und „iPad Büro" nennen.
 
 ## Sicherheit
@@ -369,7 +369,7 @@ Wohnzimmer" und „iPad Büro" nennen.
 **Hauptgerät und Rechte**
 - Das zuerst eingerichtete Gerät ist das **Hauptgerät**. Nur dort werden neue
   Geräte gekoppelt, Geräte gesperrt, Rechte vergeben und die Hauptrolle
-  weitergegeben (`jarvisd hauptgeraet <Gerät>` oder Einstellungen › Geräte).
+  weitergegeben (`mirad hauptgeraet <Gerät>` oder Einstellungen › Geräte).
 - Die Geräteliste mit allen Rechten ist vom Hauptgerät **digital signiert**
   (Ed25519). Jedes Gerät merkt sich beim Koppeln den Signaturschlüssel aus dem
   QR-Code und übernimmt nur Listen, die damit unterschrieben und neuer sind.
@@ -379,7 +379,7 @@ Wohnzimmer" und „iPad Büro" nennen.
   mäßig aus – für deine eigenen Geräte einschalten), *Dateien schicken*.
   Geprüft wird auf dem Gerät, das den Befehl bekommt.
 - Grenze: Auf seinem eigenen Rechner hat dessen Benutzer weiter die volle
-  Kontrolle (er kann Jarvis dort beenden oder deinstallieren). Andere Geräte
+  Kontrolle (er kann Mira dort beenden oder deinstallieren). Andere Geräte
   steuern kann er nur, soweit das Hauptgerät es erlaubt.
 
 **Geräte und Kopplung**
@@ -387,27 +387,27 @@ Wohnzimmer" und „iPad Büro" nennen.
   Noise `XX` mit ChaCha20-Poly1305: beide Seiten beweisen ihren Schlüssel, alles
   ist verschlüsselt, alte Mitschnitte bleiben auch später geheim (Forward Secrecy).
 - Es gibt **kein gemeinsames Passwort**. Ein neues Gerät kommt nur mit einem
-  **Einmal-Code** hinein (`jarvisd pair`, 10 Minuten gültig, nur einmal nutzbar).
+  **Einmal-Code** hinein (`mirad pair`, 10 Minuten gültig, nur einmal nutzbar).
   Der QR-Code enthält außerdem den Fingerabdruck des PCs – ein Gerät, das sich
   dazwischenschalten will, fällt auf.
-- Ein `jarvis://`-Link koppelt nie still: die App zeigt „Mit „Gaming-PC“ koppeln"
+- Ein `mira://`-Link koppelt nie still: die App zeigt „Mit „Gaming-PC“ koppeln"
   und wartet auf deine Bestätigung.
-- **Verlorenes Gerät:** `jarvisd entfernen Handy` sperrt es sofort; die Sperre
+- **Verlorenes Gerät:** `mirad entfernen Handy` sperrt es sofort; die Sperre
   verbreitet sich an alle deine Geräte, es kommt nicht wieder hinein.
-- Fremde Jarvis-Geräte im selben WLAN werden ignoriert; im Netz wird kein
+- Fremde Mira-Geräte im selben WLAN werden ignoriert; im Netz wird kein
   Gerätename angekündigt.
 
 **Auf dem Gerät**
 - Die lokale Steuerung (`127.0.0.1:7878`) verlangt ein **Zugangs-Token**, das nur
   dein Benutzerkonto lesen kann – Webseiten im Browser und andere Benutzer am
-  Rechner können Jarvis nicht steuern.
+  Rechner können Mira nicht steuern.
 - Konfiguration, Geräteschlüssel und Vertrauensliste sind nur für dich lesbar
   (Unix 0600, Windows: Benutzerprofil).
 
 **Dateien**
 - Empfangene Dateinamen werden auf den reinen Namen reduziert (kein `../`),
   eigene Zielordner liegen immer unterhalb des Home-Verzeichnisses.
-- Dateien landen erst als `.jarvis-part` und werden nur nach korrekter SHA-256
+- Dateien landen erst als `.mira-part` und werden nur nach korrekter SHA-256
   umbenannt; vorhandene Dateien werden nie überschrieben; höchstens 8 GB.
 - Unter Windows tragen empfangene Dateien die Internet-Markierung: SmartScreen
   warnt, bevor eine empfangene `.exe` startet.
@@ -416,7 +416,7 @@ Wohnzimmer" und „iPad Büro" nennen.
 - Ein gekoppeltes Gerät darf – soweit das Hauptgerät es erlaubt – auf den
   anderen Apps öffnen, Musik steuern und Dateien in deine Ordner legen.
   Koppel nur Geräte, denen du traust, und schränke die übrigen ein.
-- Jarvis lauscht im WLAN auf Port 7879. Windows fragt beim ersten Start nach der
+- Mira lauscht im WLAN auf Port 7879. Windows fragt beim ersten Start nach der
   Firewall: nur **„Private Netzwerke"** erlauben.
 - Auf dem Handy liegt der Geräteschlüssel im privaten App-Speicher (geschützt
   durch die Sandbox des Systems), noch nicht im Schlüsselbund/Keystore.
@@ -431,8 +431,8 @@ meinen Kalender ein"): Bildschirmfotos (`xcap`), Maus/Tastatur (`enigo`) und
 Claude mit dem Computer-Use-Toolset (`computer_toolset_20260801`) in einer
 Schleife – mit Rückfrage vor riskanten Schritten.
 
-**Phase 4 – Mobile Apps (erledigt).** Offen: „Teilen → Jarvis" auch auf iOS
-(Share-Extension), Siri-Kurzbefehl „Hey Siri, Jarvis …".
+**Phase 4 – Mobile Apps (erledigt).** Offen: „Teilen → Mira" auch auf iOS
+(Share-Extension), Siri-Kurzbefehl „Hey Siri, Mira …".
 
 **Phase 5 – Unterwegs.** Ein kleiner Relay-Server (oder Tailscale/WireGuard),
 damit „schick die Datei an den PC" auch aus dem Mobilfunknetz geht.
@@ -444,5 +444,5 @@ cargo test                 # Unit-Tests
 cargo clippy --all-targets
 ./scripts/e2e.sh           # zwei Geräte lokal: Fernstart + Dateiübertragung
 ./scripts/voice-e2e.sh     # dasselbe per Sprache (braucht espeak-ng, ffmpeg)
-cd mobile/android && ./gradlew :bindings-test:test   # Kotlin-Anbindung gegen echten jarvisd
+cd mobile/android && ./gradlew :bindings-test:test   # Kotlin-Anbindung gegen echten mirad
 ```

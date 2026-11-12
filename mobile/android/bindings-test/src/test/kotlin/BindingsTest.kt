@@ -1,10 +1,10 @@
-import uniffi.jarvis_mobile.Jarvis
-import uniffi.jarvis_mobile.JarvisException
-import uniffi.jarvis_mobile.PlatformBridge
-import uniffi.jarvis_mobile.Reply
-import uniffi.jarvis_mobile.isPaired
-import uniffi.jarvis_mobile.pair
-import uniffi.jarvis_mobile.parsePairingCode
+import uniffi.mira_mobile.Mira
+import uniffi.mira_mobile.MiraException
+import uniffi.mira_mobile.PlatformBridge
+import uniffi.mira_mobile.Reply
+import uniffi.mira_mobile.isPaired
+import uniffi.mira_mobile.pair
+import uniffi.mira_mobile.parsePairingCode
 import java.io.File
 import java.nio.file.Files
 import java.util.Collections
@@ -29,30 +29,30 @@ class FakeBridge : PlatformBridge {
 }
 
 class BindingsTest {
-    private val bin = File(System.getProperty("jarvis.bin"))
+    private val bin = File(System.getProperty("mira.bin"))
 
     @Test
     fun errorsArriveAsKotlinExceptions() {
-        val e = assertFailsWith<JarvisException> { parsePairingCode("https://example.com") }
-        assertTrue(e.message!!.contains("kein Jarvis-Kopplungscode"), e.message)
+        val e = assertFailsWith<MiraException> { parsePairingCode("https://example.com") }
+        assertTrue(e.message!!.contains("kein Mira-Kopplungscode"), e.message)
         val dir = Files.createTempDirectory("phone").toString()
         assertFalse(isPaired(dir))
-        assertFailsWith<JarvisException> { Jarvis.start(dir, null, FakeBridge()) }
+        assertFailsWith<MiraException> { Mira.start(dir, null, FakeBridge()) }
     }
 
     @Test
     fun phonePairsWithRealPcAndExchangesFiles() {
-        // Echter PC: jarvisd mit eigenem HOME und Port.
+        // Echter PC: mirad mit eigenem HOME und Port.
         val pcHome = Files.createTempDirectory("pc").toFile()
-        val cfg = File(pcHome, "jarvis.toml")
-        fun jarvisd(vararg args: String): ProcessBuilder =
-            ProcessBuilder(listOf(File(bin, "jarvisd").path) + args).apply {
+        val cfg = File(pcHome, "mira.toml")
+        fun mirad(vararg args: String): ProcessBuilder =
+            ProcessBuilder(listOf(File(bin, "mirad").path) + args).apply {
                 environment()["HOME"] = pcHome.path
-                environment()["JARVIS_CONFIG"] = cfg.path
+                environment()["MIRA_CONFIG"] = cfg.path
                 environment()["ANTHROPIC_API_KEY"] = ""
                 environment()["RUST_BACKTRACE"] = "0"
             }
-        assertEquals(0, jarvisd("init", "--name", "Gaming-PC").start().waitFor())
+        assertEquals(0, mirad("init", "--name", "Gaming-PC").start().waitFor())
         cfg.writeText(
             cfg.readText()
                 .replace("port = 7879", "port = 7979")
@@ -60,24 +60,24 @@ class BindingsTest {
                 .replace("mdns = true", "mdns = false")
                 .replace("provider = \"auto\"", "provider = \"off\""),
         )
-        val pc = jarvisd().redirectErrorStream(true).redirectOutput(File(pcHome, "pc.log")).start()
+        val pc = mirad().redirectErrorStream(true).redirectOutput(File(pcHome, "pc.log")).start()
         try {
             val tokenFile = File(pcHome, "control.token")
             val ready = System.currentTimeMillis() + 10_000
-            while (!tokenFile.exists()) { check(System.currentTimeMillis() < ready) { "jarvisd startet nicht" }; Thread.sleep(100) }
+            while (!tokenFile.exists()) { check(System.currentTimeMillis() < ready) { "mirad startet nicht" }; Thread.sleep(100) }
             Thread.sleep(300)
-            // Kopplungslink mit Einmal-Code genau so, wie `jarvisd pair` ihn zeigt.
-            val pairOut = jarvisd("pair").redirectErrorStream(true).start().inputStream.bufferedReader().readText()
-            val link = Regex("jarvis://pair\\?[^\"\\s]*").find(pairOut)?.value ?: error("Kein Link:\n$pairOut")
+            // Kopplungslink mit Einmal-Code genau so, wie `mirad pair` ihn zeigt.
+            val pairOut = mirad("pair").redirectErrorStream(true).start().inputStream.bufferedReader().readText()
+            val link = Regex("mira://pair\\?[^\"\\s]*").find(pairOut)?.value ?: error("Kein Link:\n$pairOut")
             val phoneDir = Files.createTempDirectory("phone").toString()
             val info = pair(phoneDir, "Pixel", "android", link)
             assertEquals("Gaming-PC", info.name)
             // mDNS im Test aus, damit nichts ins Netz geht.
-            val phoneCfg = File(phoneDir, "jarvis.toml")
+            val phoneCfg = File(phoneDir, "mira.toml")
             phoneCfg.writeText(phoneCfg.readText().replace("mdns = true", "mdns = false"))
 
             val bridge = FakeBridge()
-            val phone = Jarvis.start(phoneDir, null, bridge)
+            val phone = Mira.start(phoneDir, null, bridge)
             assertTrue(phone.status()?.contains("Kopplung läuft") ?: true)
             val until = System.currentTimeMillis() + 15_000
             while (phone.devices().none { it.name == "Gaming-PC" }) {
@@ -113,9 +113,9 @@ class BindingsTest {
             // Datei PC -> Handy, per Sprachbefehl am PC über die lokale Steuerung
             File(pcHome, "Documents").mkdirs()
             File(pcHome, "Documents/Bericht.pdf").writeText("Quartalsbericht")
-            val ask = ProcessBuilder(File(bin, "jarvis").path, "sende", "Datei", "Bericht", "an", "das", "Handy").apply {
+            val ask = ProcessBuilder(File(bin, "mira").path, "sende", "Datei", "Bericht", "an", "das", "Handy").apply {
                 environment()["HOME"] = pcHome.path
-                environment()["JARVIS_CONFIG"] = cfg.path
+                environment()["MIRA_CONFIG"] = cfg.path
             }.redirectErrorStream(true).start()
             val answer = ask.inputStream.bufferedReader().readText()
             assertEquals(0, ask.waitFor(), answer)

@@ -1,6 +1,6 @@
 [package]
 name = "uniffi-bindgen"
-description = "Erzeugt Kotlin- und Swift-Anbindungen für jarvis-mobile"
+description = "Erzeugt Kotlin- und Swift-Anbindungen für mira-mobile"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

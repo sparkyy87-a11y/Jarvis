@@ -36,10 +36,10 @@
     </queries>
 
     <application
-        android:name=".JarvisApp"
-        android:label="Jarvis"
-        android:icon="@drawable/ic_jarvis"
-        android:roundIcon="@drawable/ic_jarvis"
+        android:name=".MiraApp"
+        android:label="Mira"
+        android:icon="@drawable/ic_mira"
+        android:roundIcon="@drawable/ic_mira"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:supportsRtl="true">
 
@@ -52,14 +52,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- QR-Code vom PC: jarvis://pair?… -->
+            <!-- QR-Code vom PC: mira://pair?… -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="jarvis" android:host="pair" />
+                <data android:scheme="mira" android:host="pair" />
             </intent-filter>
-            <!-- „Teilen → Jarvis": Datei an ein Gerät schicken -->
+            <!-- „Teilen → Mira": Datei an ein Gerät schicken -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -68,12 +68,12 @@
         </activity>
 
         <service
-            android:name=".JarvisService"
+            android:name=".MiraService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Hält die verschlüsselte Verbindung zu den eigenen Jarvis-Geräten, damit Befehle und Dateien vom PC ankommen." />
+                android:value="Hält die verschlüsselte Verbindung zu den eigenen Mira-Geräten, damit Befehle und Dateien vom PC ankommen." />
         </service>
 
         <provider

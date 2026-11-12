@@ -1,0 +1,326 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use anyhow::{bail, Context, Result};
+use mira_protocol::Platform;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::transport::Identity;
+
+pub const DEFAULT_MESH_PORT: u16 = 7879;
+pub const DEFAULT_CONTROL_PORT: u16 = 7878;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    /// Datei, aus der die Konfiguration stammt (Nachbardateien: trust.toml, control.token).
+    #[serde(skip)]
+    pub source: Option<PathBuf>,
+    pub device: DeviceSection,
+    pub mesh: MeshSection,
+    /// Eigene Kurzbefehle: gesprochener Name -> Programm/Befehl,
+    /// z. B. `minecraft = "C:\\XboxGames\\Minecraft Launcher\\Content\\Minecraft.exe"`.
+    #[serde(default)]
+    pub apps: BTreeMap<String, String>,
+    #[serde(default)]
+    pub brain: BrainSection,
+    #[serde(default)]
+    pub voice: VoiceSection,
+    #[serde(default)]
+    pub hud: HudSection,
+    #[serde(default)]
+    pub music: MusicSection,
+}
+
+/// Bevorzugter Musikdienst für „spiel …".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MusicSection {
+    /// "apple-music" (Standard), "spotify" oder "youtube-music"
+    pub service: String,
+}
+
+impl Default for MusicSection {
+    fn default() -> Self {
+        Self {
+            service: "apple-music".into(),
+        }
+    }
+}
+
+/// Einstellungen für das Overlay `mira-hud`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HudSection {
+    /// Beim Autostart mitstarten.
+    pub enabled: bool,
+    /// "rechts-unten" (Standard), "links-unten", "rechts-oben", "links-oben", "mitte"
+    pub position: String,
+}
+
+impl Default for HudSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            position: "rechts-unten".into(),
+        }
+    }
+}
+
+/// Einstellungen für `mira-listen` (Spracheingabe).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VoiceSection {
+    /// Spracheingabe beim Autostart mitstarten.
+    pub enabled: bool,
+    /// Whisper-Modell, z. B. "large-v3-turbo-q5_0" (Grafikkarte) oder
+    /// "small-q5_1" (nur Prozessor). Leer = automatisch passend zum Build.
+    pub model: Option<String>,
+    /// Sprache für die Erkennung ("de", "en" oder "auto").
+    pub language: String,
+    pub wake_words: Vec<String>,
+    /// Teil des Mikrofonnamens; leer = Standardmikrofon.
+    pub input_device: Option<String>,
+    /// Antworten vorlesen.
+    pub speak_replies: bool,
+    /// Nach „Mira" ohne Befehl so lange auf den Befehl warten (Sekunden).
+    pub follow_up_seconds: u64,
+}
+
+impl Default for VoiceSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model: None,
+            language: "de".into(),
+            wake_words: vec!["mira".into()],
+            input_device: None,
+            speak_replies: true,
+            follow_up_seconds: 8,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceSection {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    /// Nur nötig, um iPadOS von iOS zu unterscheiden.
+    #[serde(default)]
+    pub platform: Option<Platform>,
+    /// Eigener Geräteschlüssel (X25519, hex). Geheim – nie weitergeben.
+    pub private_key: String,
+    pub public_key: String,
+    /// Eigener Signaturschlüssel (Ed25519, hex) – damit unterschreibt das
+    /// Hauptgerät die Geräteliste. Geheim – nie weitergeben.
+    #[serde(default)]
+    pub signing_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeshSection {
+    #[serde(default = "default_mesh_port")]
+    pub port: u16,
+    #[serde(default = "default_control_port")]
+    pub control_port: u16,
+    /// Feste Adressen ("192.168.1.20:7879"), falls mDNS im Netz nicht geht.
+    #[serde(default)]
+    pub static_peers: Vec<String>,
+    #[serde(default = "yes")]
+    pub mdns: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BrainSection {
+    /// Wer freie Sätze versteht.
+    #[serde(default)]
+    pub provider: BrainProvider,
+    /// Modellname; Standard je nach Anbieter (siehe `mira_brain`).
+    pub model: Option<String>,
+    /// Adresse des Ollama-Servers, Standard `http://127.0.0.1:11434`.
+    pub ollama_url: Option<String>,
+    /// Claude-API-Schlüssel (sonst aus `ANTHROPIC_API_KEY`). Die Datei ist nur
+    /// für den eigenen Benutzer lesbar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrainProvider {
+    /// Claude, wenn `ANTHROPIC_API_KEY` gesetzt ist, sonst Ollama (kostenlos).
+    #[default]
+    Auto,
+    /// Lokales Modell über Ollama – kostenlos, offline.
+    Ollama,
+    /// Claude über die Anthropic-API (kostenpflichtig).
+    Claude,
+    /// Nur die eingebauten Befehle, kein Sprachmodell.
+    Off,
+}
+
+impl BrainSection {
+    /// Wählt das Backend; `Err` mit Begründung, wenn keins nutzbar ist.
+    pub fn backend(&self) -> std::result::Result<Option<mira_brain::Backend>, String> {
+        let key = std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .or_else(|| self.api_key.clone())
+            .filter(|k| !k.trim().is_empty());
+        let ollama = || mira_brain::Backend::Ollama {
+            url: self
+                .ollama_url
+                .clone()
+                .unwrap_or_else(|| mira_brain::DEFAULT_OLLAMA_URL.into()),
+            model: self
+                .model
+                .clone()
+                .unwrap_or_else(|| mira_brain::DEFAULT_OLLAMA_MODEL.into()),
+        };
+        let claude = |api_key: String| mira_brain::Backend::Claude {
+            api_key,
+            model: self
+                .model
+                .clone()
+                .unwrap_or_else(|| mira_brain::DEFAULT_CLAUDE_MODEL.into()),
+        };
+        match (self.provider, key) {
+            (BrainProvider::Off, _) => Ok(None),
+            (BrainProvider::Ollama, _) | (BrainProvider::Auto, None) => Ok(Some(ollama())),
+            (BrainProvider::Claude | BrainProvider::Auto, Some(k)) => Ok(Some(claude(k))),
+            (BrainProvider::Claude, None) => {
+                Err("provider = \"claude\", aber ANTHROPIC_API_KEY fehlt".into())
+            }
+        }
+    }
+}
+
+fn default_mesh_port() -> u16 {
+    DEFAULT_MESH_PORT
+}
+fn default_control_port() -> u16 {
+    DEFAULT_CONTROL_PORT
+}
+fn yes() -> bool {
+    true
+}
+
+impl Config {
+    pub fn path() -> PathBuf {
+        if let Ok(p) = std::env::var("MIRA_CONFIG") {
+            return PathBuf::from(p);
+        }
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("mira")
+            .join("config.toml")
+    }
+
+    pub fn load() -> Result<Self> {
+        Self::load_from(&Self::path())
+    }
+
+    pub fn load_from(path: &std::path::Path) -> Result<Self> {
+        let path = path.to_path_buf();
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("{} fehlt – zuerst `mirad init` ausführen", path.display()))?;
+        let mut cfg: Config =
+            toml::from_str(&text).with_context(|| format!("{} ist ungültig", path.display()))?;
+        cfg.identity()?;
+        cfg.source = Some(path.clone());
+        if cfg.device.signing_key.is_empty() {
+            // Ältere Einrichtung: Signaturschlüssel nachrüsten.
+            cfg.device.signing_key = crate::trust::new_signing_key();
+            cfg.save_to(&path)?;
+        }
+        cfg.sign_public()?;
+        Ok(cfg)
+    }
+
+    pub fn save(&mut self) -> Result<()> {
+        self.save_to(&Self::path())
+    }
+
+    /// Speichert nur für den eigenen Benutzer lesbar (enthält den Geräteschlüssel).
+    pub fn save_to(&mut self, path: &std::path::Path) -> Result<()> {
+        crate::trust::write_private(path, &toml::to_string_pretty(self)?)?;
+        self.source = Some(path.to_path_buf());
+        Ok(())
+    }
+
+    fn sibling(&self, name: &str) -> PathBuf {
+        let base = self.source.clone().unwrap_or_else(Self::path);
+        base.parent()
+            .map(|d| d.join(name))
+            .unwrap_or_else(|| PathBuf::from(name))
+    }
+
+    /// Vertrauensliste (welche Geräte dazugehören).
+    pub fn trust_path(&self) -> PathBuf {
+        self.sibling("trust.toml")
+    }
+
+    /// Token-Pfad, wenn (noch) keine Konfiguration geladen ist.
+    pub fn default_control_token_path() -> PathBuf {
+        Self::path().with_file_name("control.token")
+    }
+
+    /// Zugangs-Token für die lokale Steuerschnittstelle.
+    pub fn control_token_path(&self) -> PathBuf {
+        self.sibling("control.token")
+    }
+
+    /// Neue Konfiguration mit frischer Geräte-ID und eigenem Schlüsselpaar.
+    pub fn new(name: String) -> Result<Self> {
+        let id = Identity::generate()?;
+        let cfg = Config {
+            source: None,
+            device: DeviceSection {
+                id: Uuid::new_v4(),
+                name,
+                aliases: vec![],
+                platform: None,
+                private_key: hex::encode(id.private),
+                public_key: id.public_hex(),
+                signing_key: crate::trust::new_signing_key(),
+            },
+            mesh: MeshSection {
+                port: DEFAULT_MESH_PORT,
+                control_port: DEFAULT_CONTROL_PORT,
+                static_peers: vec![],
+                mdns: true,
+            },
+            apps: BTreeMap::new(),
+            brain: BrainSection::default(),
+            voice: VoiceSection::default(),
+            hud: HudSection::default(),
+            music: MusicSection::default(),
+        };
+        Ok(cfg)
+    }
+
+    pub fn identity(&self) -> Result<Identity> {
+        let key = |hex_str: &str, what: &str| -> Result<[u8; 32]> {
+            let bytes = hex::decode(hex_str).with_context(|| format!("{what} ist kein Hex"))?;
+            match <[u8; 32]>::try_from(bytes.as_slice()) {
+                Ok(k) => Ok(k),
+                Err(_) => bail!("{what} muss 64 Hex-Zeichen lang sein"),
+            }
+        };
+        Ok(Identity {
+            private: key(&self.device.private_key, "private_key")?,
+            public: key(&self.device.public_key, "public_key")?,
+        })
+    }
+
+    /// Öffentlicher Signaturschlüssel (hex).
+    pub fn sign_public(&self) -> Result<String> {
+        crate::trust::public_sign_key(&self.device.signing_key)
+            .context("signing_key in der Konfiguration ist ungültig")
+    }
+
+    pub fn platform(&self) -> Platform {
+        self.device.platform.unwrap_or_else(Platform::current)
+    }
+}

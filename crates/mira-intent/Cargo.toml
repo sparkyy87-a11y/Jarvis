@@ -1,0 +1,10 @@
+[package]
+name = "mira-intent"
+description = "Schnelle, lokale Erkennung von Sprachbefehlen (Deutsch/Englisch)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mira-protocol.workspace = true
+regex = "1"

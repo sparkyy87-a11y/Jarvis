@@ -1,5 +1,5 @@
 <#
-  Baut Jarvis unter Windows – auf Wunsch mit NVIDIA-Grafikkarte für die Spracherkennung.
+  Baut Mira unter Windows – auf Wunsch mit NVIDIA-Grafikkarte für die Spracherkennung.
 
     .\scripts\build-windows.ps1            # mit Grafikkarte (CUDA)
     .\scripts\build-windows.ps1 -NurCpu    # ohne Grafikkarte
@@ -41,19 +41,19 @@ if (-not $NurCpu) {
     }
     Write-Host "CUDA $($version.Groups[1].Value).$($version.Groups[2].Value), Architektur $CudaArch"
     $env:CMAKE_CUDA_ARCHITECTURES = $CudaArch
-    $features = @("--features", "jarvis-voice/cuda")
+    $features = @("--features", "mira-voice/cuda")
 }
 
-Write-Host "Baue Jarvis (das erste Mal dauert einige Minuten) …"
+Write-Host "Baue Mira (das erste Mal dauert einige Minuten) …"
 cargo build --release --workspace @features
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $ziel = Join-Path (Get-Location) "dist"
 New-Item -ItemType Directory -Force $ziel | Out-Null
-foreach ($exe in "jarvisd.exe", "jarvis.exe", "jarvis-listen.exe", "jarvis-hintergrund.exe", "jarvis-hud.exe", "jarvis-einstellungen.exe") {
+foreach ($exe in "mirad.exe", "mira.exe", "mira-listen.exe", "mira-hintergrund.exe", "mira-hud.exe", "mira-einstellungen.exe") {
     Copy-Item "target\release\$exe" $ziel -Force
 }
 Write-Host ""
 Write-Host "Fertig: $ziel" -ForegroundColor Green
-Write-Host "  dist\jarvisd.exe init --name Gaming-PC   (einmalig)"
-Write-Host "  dist\jarvisd.exe autostart an             (startet Jarvis jetzt und bei jeder Anmeldung)"
+Write-Host "  dist\mirad.exe init --name Gaming-PC   (einmalig)"
+Write-Host "  dist\mirad.exe autostart an             (startet Mira jetzt und bei jeder Anmeldung)"

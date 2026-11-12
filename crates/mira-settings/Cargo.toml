@@ -1,0 +1,23 @@
+[package]
+name = "mira-settings"
+description = "Einstellungen für Mira mit grafischer Oberfläche"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mira-einstellungen"
+path = "src/main.rs"
+
+[dependencies]
+mira-node = { path = "../mira-node" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eframe = { version = "0.33", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
+qrcode = { version = "0.14", default-features = false }
+cpal = "0.18"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+
+[dev-dependencies]
+tempfile = "3"

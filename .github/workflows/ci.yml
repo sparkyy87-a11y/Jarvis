@@ -1,4 +1,4 @@
-# Baut und testet Jarvis auf Linux, Windows und macOS.
+# Baut und testet Mira auf Linux, Windows und macOS.
 name: CI
 
 on:
@@ -38,7 +38,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/jarvis/models
+          path: ~/.local/share/mira/models
           key: whisper-small-q5_1-silero-v5.1.2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
@@ -53,18 +53,18 @@ jobs:
         run: cargo build --release
       - uses: actions/upload-artifact@v4
         with:
-          name: jarvis-${{ matrix.os }}
+          name: mira-${{ matrix.os }}
           path: |
-            target/release/jarvisd
-            target/release/jarvis
-            target/release/jarvisd.exe
-            target/release/jarvis.exe
-            target/release/jarvis-listen
-            target/release/jarvis-listen.exe
-            target/release/jarvis-hintergrund
-            target/release/jarvis-hintergrund.exe
-            target/release/jarvis-hud
-            target/release/jarvis-hud.exe
-            target/release/jarvis-einstellungen
-            target/release/jarvis-einstellungen.exe
+            target/release/mirad
+            target/release/mira
+            target/release/mirad.exe
+            target/release/mira.exe
+            target/release/mira-listen
+            target/release/mira-listen.exe
+            target/release/mira-hintergrund
+            target/release/mira-hintergrund.exe
+            target/release/mira-hud
+            target/release/mira-hud.exe
+            target/release/mira-einstellungen
+            target/release/mira-einstellungen.exe
           if-no-files-found: ignore

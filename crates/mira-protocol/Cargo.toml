@@ -1,0 +1,12 @@
+[package]
+name = "mira-protocol"
+description = "Gemeinsame Typen und das Drahtformat zwischen Mira-Geräten"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+postcard = { version = "1", features = ["use-std"] }

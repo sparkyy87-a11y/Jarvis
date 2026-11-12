@@ -15,9 +15,9 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-jarvis-protocol = { path = "crates/jarvis-protocol" }
-jarvis-intent = { path = "crates/jarvis-intent" }
-jarvis-brain = { path = "crates/jarvis-brain" }
+mira-protocol = { path = "crates/mira-protocol" }
+mira-intent = { path = "crates/mira-intent" }
+mira-brain = { path = "crates/mira-brain" }
 
 [profile.release]
 lto = "thin"

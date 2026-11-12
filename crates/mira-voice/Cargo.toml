@@ -1,0 +1,32 @@
+[package]
+name = "mira-voice"
+description = "Spracheingabe für Mira: Mikrofon, Sprachaktivität, Weckwort, Whisper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mira-listen"
+path = "src/bin/mira-listen.rs"
+
+[features]
+default = []
+# Grafikkarte nutzen (NVIDIA: CUDA-Toolkit beim Bauen nötig)
+cuda = ["whisper-rs/cuda"]
+vulkan = ["whisper-rs/vulkan"]
+metal = ["whisper-rs/metal"]
+
+[dependencies]
+mira-node = { path = "../mira-node" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+whisper-rs = "0.16"
+cpal = "0.18"
+hound = "3"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }

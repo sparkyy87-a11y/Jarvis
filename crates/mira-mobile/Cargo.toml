@@ -1,0 +1,21 @@
+[package]
+name = "mira-mobile"
+description = "Mira-Kern für die iPhone-, iPad- und Android-Apps (UniFFI)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib", "lib"]
+name = "mira_mobile"
+
+[dependencies]
+mira-node = { path = "../mira-node", default-features = false }
+mira-protocol.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uniffi = "0.32"
+
+[dev-dependencies]
+tempfile = "3"

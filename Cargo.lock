@@ -1996,126 +1996,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
-name = "jarvis-brain"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "jarvis-protocol",
- "reqwest",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jarvis-hud"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "eframe",
- "jarvis-node",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "jarvis-intent"
-version = "0.1.0"
-dependencies = [
- "jarvis-protocol",
- "regex",
-]
-
-[[package]]
-name = "jarvis-mobile"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "jarvis-node",
- "jarvis-protocol",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "uniffi",
-]
-
-[[package]]
-name = "jarvis-node"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "clap",
- "dirs",
- "ed25519-dalek",
- "futures",
- "gethostname 0.5.0",
- "hex",
- "jarvis-brain",
- "jarvis-intent",
- "jarvis-protocol",
- "mdns-sd",
- "qrcode",
- "rand 0.8.8",
- "serde",
- "serde_json",
- "sha2",
- "snow",
- "sysinfo",
- "tempfile",
- "tokio",
- "tokio-util",
- "toml 0.8.23",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "jarvis-protocol"
-version = "0.1.0"
-dependencies = [
- "postcard",
- "serde",
- "thiserror 2.0.21",
- "uuid",
-]
-
-[[package]]
-name = "jarvis-settings"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cpal",
- "eframe",
- "jarvis-node",
- "qrcode",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "jarvis-voice"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "cpal",
- "dirs",
- "hound",
- "jarvis-node",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "whisper-rs",
-]
-
-[[package]]
 name = "jni"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2372,6 +2252,126 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mira-brain"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "mira-protocol",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mira-hud"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "mira-node",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mira-intent"
+version = "0.1.0"
+dependencies = [
+ "mira-protocol",
+ "regex",
+]
+
+[[package]]
+name = "mira-mobile"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "mira-node",
+ "mira-protocol",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "uniffi",
+]
+
+[[package]]
+name = "mira-node"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "dirs",
+ "ed25519-dalek",
+ "futures",
+ "gethostname 0.5.0",
+ "hex",
+ "mdns-sd",
+ "mira-brain",
+ "mira-intent",
+ "mira-protocol",
+ "qrcode",
+ "rand 0.8.8",
+ "serde",
+ "serde_json",
+ "sha2",
+ "snow",
+ "sysinfo",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mira-protocol"
+version = "0.1.0"
+dependencies = [
+ "postcard",
+ "serde",
+ "thiserror 2.0.21",
+ "uuid",
+]
+
+[[package]]
+name = "mira-settings"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cpal",
+ "eframe",
+ "mira-node",
+ "qrcode",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "mira-voice"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cpal",
+ "dirs",
+ "hound",
+ "mira-node",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "whisper-rs",
 ]
 
 [[package]]
