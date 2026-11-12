@@ -152,7 +152,7 @@ static PAIR_DEVICE: Lazy = (
 );
 static MEDIA_PAUSE: Lazy = (
     OnceLock::new(),
-    r"(?i)^(?:pause|pausieren|pausiere|(?:die\s+)?musik\s+(?:pausieren|pause|stoppen|stopp|stop|anhalten|aus)|stopp?e?\s+(?:die\s+)?musik|halt\s+(?:die\s+)?musik\s+an|mach\s+(?:die\s+)?musik\s+aus)$",
+    r"(?i)^(?:pause|pausieren|pausiere|stopp?|anhalten|(?:die\s+)?musik\s+(?:pausieren|pause|stoppen|stopp|stop|anhalten|aus)|stopp?e?\s+(?:die\s+)?musik|halt\s+(?:die\s+)?musik\s+an|mach\s+(?:die\s+)?musik\s+aus)$",
 );
 static MEDIA_PLAY: Lazy = (
     OnceLock::new(),
@@ -534,6 +534,8 @@ mod tests {
             })
         };
         assert_eq!(p("Pause"), media(MediaCommand::Pause, Target::Here));
+        assert_eq!(p("Stopp"), media(MediaCommand::Pause, Target::Here));
+        assert_eq!(p("stop"), media(MediaCommand::Pause, Target::Here));
         assert_eq!(
             p("Mira, stopp die Musik!"),
             media(MediaCommand::Pause, Target::Here)
