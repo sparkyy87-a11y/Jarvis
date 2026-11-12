@@ -72,9 +72,10 @@ Filename: "{app}\mirad.exe"; Parameters: "join ""{code:PairCode}"" --name ""{cod
 ; 2. Firewall nur für private Netzwerke (einmal Administratorrechte)
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Mira"" dir=in action=allow program=""{app}\mirad.exe"" protocol=TCP localport=7879 profile=private enable=yes"; Verb: "runas"; StatusMsg: "Firewall wird für das Heimnetz freigegeben …"; Flags: shellexec runhidden waituntilterminated; Tasks: firewall
 ; 3. Kostenloses Sprachmodell
-Filename: "winget.exe"; Parameters: "install -e --id Ollama.Ollama --silent --accept-source-agreements --accept-package-agreements"; StatusMsg: "Ollama wird installiert …"; Flags: runhidden waituntilterminated; Tasks: ollama
-Filename: "{localappdata}\Programs\Ollama\ollama.exe"; Parameters: "pull qwen2.5:3b"; StatusMsg: "Sprachmodell wird geladen (ca. 2 GB) …"; Flags: waituntilterminated; Tasks: ollama\klein
-Filename: "{localappdata}\Programs\Ollama\ollama.exe"; Parameters: "pull qwen2.5:7b"; StatusMsg: "Sprachmodell wird geladen (ca. 5 GB) …"; Flags: waituntilterminated; Tasks: ollama\gross
+; Ollama nur installieren, wenn es fehlt – direkt vom Hersteller (winget gibt es nicht überall).
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$ProgressPreference='SilentlyContinue'; $f=Join-Path $env:TEMP 'OllamaSetup.exe'; Invoke-WebRequest 'https://ollama.com/download/OllamaSetup.exe' -OutFile $f; Start-Process -Wait $f -ArgumentList '/VERYSILENT','/NORESTART'"""; StatusMsg: "Ollama wird heruntergeladen und installiert (über 1 GB – das dauert einige Minuten) …"; Flags: runhidden waituntilterminated; Tasks: ollama; Check: OllamaMissing
+Filename: "{localappdata}\Programs\Ollama\ollama.exe"; Parameters: "pull qwen2.5:3b"; StatusMsg: "Sprachmodell wird geladen (ca. 2 GB) …"; Flags: waituntilterminated skipifdoesntexist; Tasks: ollama\klein
+Filename: "{localappdata}\Programs\Ollama\ollama.exe"; Parameters: "pull qwen2.5:7b"; StatusMsg: "Sprachmodell wird geladen (ca. 5 GB) …"; Flags: waituntilterminated skipifdoesntexist; Tasks: ollama\gross
 ; 4. Whisper-Modell vorab laden
 Filename: "{app}\mira-listen.exe"; Parameters: "--nur-modelle"; StatusMsg: "Spracherkennung wird geladen (ca. 190 MB) …"; Flags: waituntilterminated; Tasks: sprache
 ; 5. Starten und bei jeder Anmeldung starten
@@ -87,6 +88,11 @@ Filename: "{app}\mirad.exe"; Parameters: "autostart aus"; Flags: runhidden waitu
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Mira"""; Verb: "runas"; Flags: shellexec runhidden waituntilterminated skipifdoesntexist; RunOnceId: "MiraFirewall"
 
 [Code]
+function OllamaMissing: Boolean;
+begin
+  Result := not FileExists(ExpandConstant('{localappdata}\Programs\Ollama\ollama.exe'));
+end;
+
 var
   NamePage: TInputQueryWizardPage;
   ModePage: TInputOptionWizardPage;
