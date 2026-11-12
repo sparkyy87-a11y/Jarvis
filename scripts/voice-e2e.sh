@@ -37,6 +37,8 @@ sed -i 's/^port = 7879/port = 7889/; s/^control_port = 7878/control_port = 7888/
 mkdir -p "$W/ipad/Documents" && echo "Quartalsbericht" > "$W/ipad/Documents/Bericht.pdf"
 env HOME="$W/ipad" JARVIS_CONFIG="$W/ipad/config.toml" "$B/jarvisd" > "$W/ipad.log" 2>&1 & PIDS+=($!)
 for _ in $(seq 100); do ipad "$B/jarvis" geräte 2>/dev/null | grep -q Gaming-PC && break; sleep 0.1; done
+# Der PC ist Hauptgerät: dem iPad das Steuern ausdrücklich erlauben.
+pc "$B/jarvisd" rechte iPad --hauptgeraet ja >/dev/null
 
 ipad "$B/jarvis-listen" --datei "$W/aufnahme.wav" --leise 2>&1 | sed 's/\x1b\[[0-9;]*m//g; s/^.*jarvis_listen: //' | tee "$W/listen.log"
 
